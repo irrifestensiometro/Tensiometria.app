@@ -10,6 +10,7 @@ import { AppProvider, useAppContext } from './context/AppContext';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Contato from './pages/Contato';
+import RoleSelect from './pages/RoleSelect';
 
 import ProdutorLayout from './layouts/ProdutorLayout';
 import ProdutorDashboard from './pages/produtor/Dashboard';
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login/:type" element={<Login />} />
           <Route path="/contato" element={<Contato />} />
+          <Route path="/selecionar-tipo" element={<RoleSelect />} />
           
           {/* Rotas Produtor */}
           <Route path="/produtor" element={<ProdutorLayout />}>

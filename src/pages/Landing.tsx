@@ -28,14 +28,14 @@ export default function Landing() {
             <button onClick={() => scrollTo('como-funciona')} className="text-slate-500 hover:text-slate-800 transition-colors">Como Funciona</button>
             <button onClick={() => scrollTo('beneficios')} className="text-slate-500 hover:text-slate-800 transition-colors">Benefícios</button>
             <button
-              onClick={() => navigate('/login/produtor')}
+              onClick={() => navigate('/selecionar-tipo')}
               className="bg-[#356b46] hover:bg-[#2a5538] text-white px-5 py-2 rounded-xl font-bold text-sm transition-colors"
             >
               Acessar Sistema
             </button>
           </div>
 
-          <button onClick={() => navigate('/login/produtor')} className="md:hidden bg-[#356b46] text-white px-4 py-2 rounded-xl font-bold text-sm transition-colors">
+          <button onClick={() => navigate('/selecionar-tipo')} className="md:hidden bg-[#356b46] text-white px-4 py-2 rounded-xl font-bold text-sm transition-colors">
             Entrar
           </button>
         </div>
@@ -70,7 +70,7 @@ export default function Landing() {
                 onClick={() => navigate('/login/produtor')}
                 className="bg-[#356b46] hover:bg-[#2a5538] text-white px-8 py-4 rounded-2xl font-bold text-base shadow-lg shadow-green-200 hover:shadow-xl transition-all flex items-center justify-center space-x-2"
               >
-                <span>Quero otimizar minha irrigação</span>
+                <span>Sou Produtor Rural</span>
                 <ArrowRight size={18} />
               </button>
               <button
@@ -211,7 +211,7 @@ export default function Landing() {
               <ArrowRight size={18} />
             </button>
             <button
-              onClick={() => navigate('/login/produtor')}
+              onClick={() => navigate('/selecionar-tipo')}
               className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-8 py-4 rounded-2xl font-bold text-base transition-all"
             >
               Criar Conta Gratuita
@@ -235,7 +235,7 @@ export default function Landing() {
               <button onClick={() => scrollTo('como-funciona')} className="hover:text-white transition-colors">Como Funciona</button>
               <button onClick={() => scrollTo('beneficios')} className="hover:text-white transition-colors">Benefícios</button>
               <button onClick={() => navigate('/contato')} className="hover:text-white transition-colors">Contato</button>
-              <button onClick={() => navigate('/login/produtor')} className="hover:text-white transition-colors">Acessar</button>
+              <button onClick={() => navigate('/selecionar-tipo')} className="hover:text-white transition-colors">Acessar</button>
             </div>
           </div>
           <div className="border-t border-slate-800 mt-8 pt-8 text-center text-xs">
