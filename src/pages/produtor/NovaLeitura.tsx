@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { calcularIrrigacao } from '../../lib/irrigationMath';
@@ -22,6 +22,16 @@ export default function NovaLeitura() {
   if (!area) {
     return <div className="p-4 text-center">Área não encontrada.</div>;
   }
+
+  const setores = useMemo(() => {
+    const grupos = new Map<string, typeof area.tensiometros>();
+    area.tensiometros.forEach(t => {
+      const setor = t.setor || 'Tensiômetros';
+      if (!grupos.has(setor)) grupos.set(setor, []);
+      grupos.get(setor)!.push(t);
+    });
+    return Array.from(grupos.entries());
+  }, [area.tensiometros]);
 
   const handleCalcular = () => {
     const leiturasFormatadas: LeituraValor[] = area.tensiometros.map(t => ({
@@ -139,20 +149,29 @@ export default function NovaLeitura() {
           <p className="text-slate-500 text-sm mt-1">Insira os valores atuais dos tensiômetros (kPa)</p>
         </div>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
-          {area.tensiometros.map(t => (
-            <div key={t.id} className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-              <label className="block text-slate-500 font-bold mb-3">Profundidade: {t.prof_cm} cm</label>
-              <div className="relative">
-                <input 
-                  type="number" 
-                  inputMode="numeric"
-                  placeholder="0"
-                  value={valores[t.id] || ''}
-                  onChange={(e) => setValores(prev => ({ ...prev, [t.id]: e.target.value }))}
-                  className="w-full text-center text-4xl font-black text-slate-800 bg-white rounded-xl py-6 pr-12 border border-slate-200 focus:border-[#b57d59] focus:ring-4 focus:ring-[#f5e6de] outline-none transition-all shadow-sm"
-                />
-                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-bold text-slate-400">kPa</span>
+        <div className="space-y-6 mb-8">
+          {setores.map(([nomeSetor, tensiometros]) => (
+            <div key={nomeSetor} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="bg-[#f5e6de] px-6 py-3 border-b border-slate-200">
+                <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wider">{nomeSetor}</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4">
+                {tensiometros.map(t => (
+                  <div key={t.id} className="bg-slate-50 p-5 rounded-xl border border-slate-100">
+                    <label className="block text-slate-500 font-bold mb-3 text-sm">Profundidade: {t.prof_cm} cm</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={valores[t.id] || ''}
+                        onChange={(e) => setValores(prev => ({ ...prev, [t.id]: e.target.value }))}
+                        className="w-full text-center text-4xl font-black text-slate-800 bg-white rounded-xl py-6 pr-12 border border-slate-200 focus:border-[#b57d59] focus:ring-4 focus:ring-[#f5e6de] outline-none transition-all shadow-sm"
+                      />
+                      <span className="absolute right-6 top-1/2 -translate-y-1/2 font-bold text-slate-400">kPa</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
