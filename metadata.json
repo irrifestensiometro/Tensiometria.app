@@ -1,0 +1,8 @@
+{
+  "name": "IrrIFES",
+  "description": "Plataforma web para auxiliar produtores rurais no cálculo do tempo de irrigação com base em tensiômetros.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
