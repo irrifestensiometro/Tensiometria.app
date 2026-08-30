@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles } from 'lucide-react';
-import { Area, Tensiometro, Produtor } from '../../types';
+import { Area, Produtor } from '../../types';
+import { validarParametrosIrrigacao } from '../../lib/irrigationMath';
 import { MapContainer, TileLayer, Marker, Popup, Polygon, LayersControl } from 'react-leaflet';
 import { initLeafletIcons } from '../../lib/leaflet-setup';
 import { PolygonDrawer } from '../../components/map/MapUtils';
@@ -24,27 +25,11 @@ const SUGESTOES_CULTURA = [
   { nome: 'Hortaliças', prof_raiz_mm: 200 },
 ];
 
-const SUGESTOES_SOLO = [
-  { nome: 'Franco', coef_a: 0.020, coef_b: 0.015, umidade_cc: 0.30 },
-  { nome: 'Argiloso', coef_a: 0.035, coef_b: 0.025, umidade_cc: 0.40 },
-  { nome: 'Arenoso', coef_a: 0.010, coef_b: 0.008, umidade_cc: 0.15 },
-  { nome: 'Siltoso', coef_a: 0.025, coef_b: 0.020, umidade_cc: 0.35 },
-  { nome: 'Franco-argiloso', coef_a: 0.028, coef_b: 0.020, umidade_cc: 0.35 },
-  { nome: 'Franco-arenoso', coef_a: 0.015, coef_b: 0.012, umidade_cc: 0.22 },
-];
-
-const SUGESTOES_IRRIGACAO = [
-  { nome: 'Gotejamento', eficiencia_ea: 0.90, vazao_ip: 2.0, pam: 0.40 },
-  { nome: 'Microaspersão', eficiencia_ea: 0.85, vazao_ip: 4.0, pam: 0.60 },
-  { nome: 'Irrigação Localizada', eficiencia_ea: 0.90, vazao_ip: 3.0, pam: 0.50 },
-  { nome: 'Pivô Central', eficiencia_ea: 0.85, vazao_ip: 8.0, pam: 1.0 },
-  { nome: 'Aspersão', eficiencia_ea: 0.75, vazao_ip: 12.0, pam: 1.0 },
-  { nome: 'Sulco', eficiencia_ea: 0.60, vazao_ip: 15.0, pam: 1.0 },
-];
-
 export default function NovaArea() {
   const navigate = useNavigate();
-  const { produtores, currentUser, addArea } = useAppContext();
+  const { areaId } = useParams();
+  const { produtores, currentUser, areas, addArea, updateArea } = useAppContext();
+  const areaEmEdicao = areaId ? areas.find(area => area.id === areaId) : undefined;
 
   const [step, setStep] = useState(1);
   const totalSteps = 6;
@@ -65,8 +50,8 @@ export default function NovaArea() {
   const [selectedProdutor, setSelectedProdutor] = useState<Produtor | null>(null);
 
   const [culturaSugerida, setCulturaSugerida] = useState('');
-  const [tipoSoloSugerido, setTipoSoloSugerido] = useState('');
-  const [sistemaIrrigacaoSugerido, setSistemaIrrigacaoSugerido] = useState('');
+  const [formError, setFormError] = useState<string[]>([]);
+  const [edicaoCarregada, setEdicaoCarregada] = useState(false);
 
   useEffect(() => {
     if (formData.produtor_id) {
@@ -84,12 +69,59 @@ export default function NovaArea() {
   type SetorForm = {
     id: string;
     nome: string;
-    tensiometros: { id: string; prof_cm: number }[];
+    tensiometros: {
+      id: string;
+      prof_cm: number;
+      camada_inicio_cm: number;
+      camada_fim_cm: number;
+      tipo: 'decisao' | 'controle';
+      tensao_critica: number;
+    }[];
   };
 
+  const novoTensiometro = (sufixo = '') => ({
+    id: `t_${Date.now()}${sufixo}`,
+    prof_cm: 15,
+    camada_inicio_cm: 0,
+    camada_fim_cm: 30,
+    tipo: 'decisao' as const,
+    tensao_critica: 40,
+  });
+
   const [setores, setSetores] = useState<SetorForm[]>([
-    { id: 'setor_1', nome: 'Setor 1', tensiometros: [{ id: `t_${Date.now()}`, prof_cm: 20 }] }
+    { id: 'setor_1', nome: 'Setor 1', tensiometros: [novoTensiometro()] }
   ]);
+
+  useEffect(() => {
+    if (!areaEmEdicao || edicaoCarregada) return;
+    setFormData({
+      nome: areaEmEdicao.nome,
+      produtor_id: areaEmEdicao.produtor_id,
+      coef_a: String(areaEmEdicao.solo.coef_a),
+      coef_b: String(areaEmEdicao.solo.coef_b),
+      umidade_cc: String(areaEmEdicao.solo.umidade_cc),
+      prof_raiz_mm: String(areaEmEdicao.planta.prof_raiz_mm),
+      eficiencia_ea: String(areaEmEdicao.irrigacao.eficiencia_ea),
+      vazao_ip: String(areaEmEdicao.irrigacao.vazao_ip),
+      pam: String(areaEmEdicao.irrigacao.pam),
+    });
+    setPolygonPoints(areaEmEdicao.poligono?.map(ponto => [ponto.lat, ponto.lng]) || []);
+    const grupos = new Map<string, SetorForm>();
+    areaEmEdicao.tensiometros.forEach((tensiometro, indice) => {
+      const nomeSetor = tensiometro.setor || 'Setor 1';
+      if (!grupos.has(nomeSetor)) grupos.set(nomeSetor, { id: `setor_edicao_${indice}`, nome: nomeSetor, tensiometros: [] });
+      grupos.get(nomeSetor)!.tensiometros.push({
+        id: tensiometro.id,
+        prof_cm: tensiometro.prof_cm,
+        camada_inicio_cm: tensiometro.camada_inicio_cm,
+        camada_fim_cm: tensiometro.camada_fim_cm,
+        tipo: tensiometro.tipo || (tensiometro.is_controle ? 'controle' : 'decisao'),
+        tensao_critica: tensiometro.tensao_critica,
+      });
+    });
+    if (grupos.size > 0) setSetores(Array.from(grupos.values()));
+    setEdicaoCarregada(true);
+  }, [areaEmEdicao, edicaoCarregada]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -98,7 +130,7 @@ export default function NovaArea() {
   const handleAddSetor = () => {
     setSetores([
       ...setores,
-      { id: `setor_${Date.now()}`, nome: `Setor ${setores.length + 1}`, tensiometros: [{ id: `t_${Date.now()}_1`, prof_cm: 20 }] }
+      { id: `setor_${Date.now()}`, nome: `Setor ${setores.length + 1}`, tensiometros: [novoTensiometro('_1')] }
     ]);
   };
 
@@ -115,18 +147,18 @@ export default function NovaArea() {
   const handleAddTensiometro = (setId: string) => {
     setSetores(setores.map(s => {
       if (s.id === setId) {
-        return { ...s, tensiometros: [...s.tensiometros, { id: `t_${Date.now()}_${Math.random()}`, prof_cm: 20 }] };
+        return { ...s, tensiometros: [...s.tensiometros, { ...novoTensiometro(`_${Math.random()}`), tipo: 'controle' }] };
       }
       return s;
     }));
   };
 
-  const handleUpdateTensiometro = (setId: string, tId: string, prof_cm: number) => {
+  const handleUpdateTensiometro = (setId: string, tId: string, alteracoes: Partial<SetorForm['tensiometros'][number]>) => {
     setSetores(setores.map(s => {
       if (s.id === setId) {
         return {
           ...s,
-          tensiometros: s.tensiometros.map(t => t.id === tId ? { ...t, prof_cm } : t)
+          tensiometros: s.tensiometros.map(t => t.id === tId ? { ...t, ...alteracoes } : t)
         };
       }
       return s;
@@ -146,8 +178,8 @@ export default function NovaArea() {
 
   const handleFinish = () => {
     const novaArea: Area = {
-      id: `area_${Date.now()}`,
-      agronomo_id: currentUser!.id,
+      id: areaEmEdicao?.id || `area_${Date.now()}`,
+      agronomo_id: areaEmEdicao?.agronomo_id || currentUser!.id,
       produtor_id: formData.produtor_id,
       nome: formData.nome,
       poligono: polygonPoints.map(p => ({ lat: p[0], lng: p[1] })),
@@ -168,14 +200,26 @@ export default function NovaArea() {
         id: t.id,
         prof_cm: t.prof_cm,
         setor: s.nome,
-        camada_inicio_cm: Math.max(0, t.prof_cm - 10),
-        camada_fim_cm: t.prof_cm + 10,
-        is_controle: false,
-        tensao_critica: 40
+        camada_inicio_cm: t.camada_inicio_cm,
+        camada_fim_cm: t.camada_fim_cm,
+        tipo: t.tipo,
+        is_controle: t.tipo === 'controle',
+        tensao_critica: t.tensao_critica
       })))
     };
 
-    addArea(novaArea);
+    const problemasGerais = [
+      ...(!novaArea.nome.trim() ? ['Informe o nome da área.'] : []),
+      ...(!novaArea.produtor_id ? ['Selecione o produtor vinculado.'] : []),
+      ...validarParametrosIrrigacao(novaArea),
+    ];
+    if (problemasGerais.length > 0) {
+      setFormError(problemasGerais);
+      return;
+    }
+
+    if (areaEmEdicao) updateArea(novaArea);
+    else addArea(novaArea);
     navigate('/agronomo/dashboard');
   };
 
@@ -184,32 +228,6 @@ export default function NovaArea() {
     if (cult) {
       setFormData(prev => ({ ...prev, prof_raiz_mm: String(cult.prof_raiz_mm) }));
       setCulturaSugerida(nome);
-    }
-  };
-
-  const aplicarSolo = (nome: string) => {
-    const solo = SUGESTOES_SOLO.find(s => s.nome === nome);
-    if (solo) {
-      setFormData(prev => ({
-        ...prev,
-        coef_a: String(solo.coef_a),
-        coef_b: String(solo.coef_b),
-        umidade_cc: String(solo.umidade_cc),
-      }));
-      setTipoSoloSugerido(nome);
-    }
-  };
-
-  const aplicarIrrigacao = (nome: string) => {
-    const sist = SUGESTOES_IRRIGACAO.find(s => s.nome === nome);
-    if (sist) {
-      setFormData(prev => ({
-        ...prev,
-        eficiencia_ea: String(sist.eficiencia_ea),
-        vazao_ip: String(sist.vazao_ip),
-        pam: String(sist.pam),
-      }));
-      setSistemaIrrigacaoSugerido(nome);
     }
   };
 
@@ -222,7 +240,7 @@ export default function NovaArea() {
           <ArrowLeft size={24} className="text-slate-700" />
         </button>
         <div>
-          <h1 className="text-3xl font-bold text-slate-800">Cadastrar Nova Área</h1>
+          <h1 className="text-3xl font-bold text-slate-800">{areaEmEdicao ? 'Revisar Parâmetros da Área' : 'Cadastrar Nova Área'}</h1>
           <p className="text-slate-500">Configuração dos parâmetros de irrigação e mapeamento</p>
         </div>
       </div>
@@ -247,6 +265,14 @@ export default function NovaArea() {
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        {formError.length > 0 && (
+          <div className="m-6 mb-0 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <p className="font-bold mb-2">Revise os parâmetros antes de salvar:</p>
+            <ul className="list-disc pl-5 space-y-1">
+              {formError.map(problema => <li key={problema}>{problema}</li>)}
+            </ul>
+          </div>
+        )}
         <div className="p-8">
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
@@ -334,36 +360,23 @@ export default function NovaArea() {
           {step === 3 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Tipo de Solo</h2>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Sugestão por Tipo de Solo</label>
-                <select value={tipoSoloSugerido} onChange={(e) => aplicarSolo(e.target.value)} className={`${inputClass} bg-white`}>
-                  <option value="">Selecione o tipo de solo (preenche automaticamente)</option>
-                  {SUGESTOES_SOLO.map(s => (
-                    <option key={s.nome} value={s.nome}>
-                      {s.nome} — a={s.coef_a} b={s.coef_b} θcc={s.umidade_cc}
-                    </option>
-                  ))}
-                </select>
-                {tipoSoloSugerido && (
-                  <p className="text-xs text-green-600 font-medium mt-1.5 flex items-center">
-                    <Sparkles size={12} className="mr-1" />
-                    Parâmetros preenchidos para solo {tipoSoloSugerido}
-                  </p>
-                )}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-bold">Use os valores do laudo físico-hídrico do solo.</p>
+                <p className="mt-1">Os coeficientes A e B precisam ser ajustados para a curva θ = A × ψ⁻ᴮ, com ψ em kPa e θ em cm³/cm³. O sistema não usa valores genéricos por textura.</p>
               </div>
               <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Parâmetros do Solo e Planta</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <FieldLabel label="Coeficiente A (a)" tooltip="Constante de calibração 'a' específica do solo, usada na equação característica da curva de retenção de água. Valores típicos: 0.008–0.040." />
-                  <input type="number" step="0.001" min="0.001" max="0.100" name="coef_a" value={formData.coef_a} onChange={handleChange} placeholder="Ex: 0.020 (franco)" className={inputClass} />
+                  <FieldLabel label="Coeficiente A (a)" tooltip="Constante ajustada em laboratório para a curva θ = A × ψ⁻ᴮ, usando ψ em kPa. Não use um valor genérico por textura." />
+                  <input type="number" step="0.001" min="0.001" max="1.5" name="coef_a" value={formData.coef_a} onChange={handleChange} placeholder="Valor do laudo" className={inputClass} />
                 </div>
                 <div>
-                  <FieldLabel label="Coeficiente B (b)" tooltip="Constante de calibração 'b' específica do solo. Valores típicos: 0.005–0.030." />
-                  <input type="number" step="0.001" min="0.001" max="0.050" name="coef_b" value={formData.coef_b} onChange={handleChange} placeholder="Ex: 0.015 (franco)" className={inputClass} />
+                  <FieldLabel label="Coeficiente B (b)" tooltip="Expoente ajustado em laboratório para a curva de retenção. Deve usar a mesma unidade de pressão adotada no sistema: kPa." />
+                  <input type="number" step="0.001" min="0.001" max="2" name="coef_b" value={formData.coef_b} onChange={handleChange} placeholder="Valor do laudo" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Umidade Capac. Campo (θcc)" tooltip="Umidade volumétrica na capacidade de campo (cm³/cm³). Valores típicos: 0.10–0.50." />
-                  <input type="number" step="0.01" min="0.01" max="0.60" name="umidade_cc" value={formData.umidade_cc} onChange={handleChange} placeholder="Ex: 0.30 (franco)" className={inputClass} />
+                  <input type="number" step="0.001" min="0.01" max="1" name="umidade_cc" value={formData.umidade_cc} onChange={handleChange} placeholder="Ex: 0.280" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Profundidade Raiz (Z) – mm" tooltip="Profundidade efetiva do sistema radicular da cultura, usada para calcular o volume de água disponível no solo e o tempo de irrigação." />
@@ -376,22 +389,9 @@ export default function NovaArea() {
           {step === 4 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Sistema de Irrigação</h2>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">Sugestão por Sistema</label>
-                <select value={sistemaIrrigacaoSugerido} onChange={(e) => aplicarIrrigacao(e.target.value)} className={`${inputClass} bg-white`}>
-                  <option value="">Selecione o sistema (preenche automaticamente)</option>
-                  {SUGESTOES_IRRIGACAO.map(s => (
-                    <option key={s.nome} value={s.nome}>
-                      {s.nome} — Ea={s.eficiencia_ea} Ip={s.vazao_ip}mm/h PAM={s.pam}
-                    </option>
-                  ))}
-                </select>
-                {sistemaIrrigacaoSugerido && (
-                  <p className="text-xs text-green-600 font-medium mt-1.5 flex items-center">
-                    <Sparkles size={12} className="mr-1" />
-                    Parâmetros preenchidos para {sistemaIrrigacaoSugerido}
-                  </p>
-                )}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p className="font-bold">Informe valores medidos ou obtidos no projeto hidráulico.</p>
+                <p className="mt-1">A intensidade deve estar em mm/h sobre a mesma área de referência usada pela lâmina. Vazão de emissor em L/h não pode ser usada diretamente.</p>
               </div>
               <div className="space-y-4">
                 <div>
@@ -399,8 +399,8 @@ export default function NovaArea() {
                   <input type="number" step="0.01" min="0.01" max="1.00" name="eficiencia_ea" value={formData.eficiencia_ea} onChange={handleChange} placeholder="Ex: 0.85 (85%)" className={inputClass} />
                 </div>
                 <div>
-                  <FieldLabel label="Vazão / Precipitação (Ip) – mm/h" tooltip="Lâmina de água aplicada por hora pelo sistema. Varia de 1 mm/h (gotejamento) a 20 mm/h (aspersão)." />
-                  <input type="number" step="0.5" min="0.5" max="50" name="vazao_ip" value={formData.vazao_ip} onChange={handleChange} placeholder="Ex: 8.0 (pivô)" className={inputClass} />
+                  <FieldLabel label="Intensidade de Aplicação (Ip) – mm/h" tooltip="Lâmina média aplicada por hora sobre a área de referência. Para irrigação localizada, converta a vazão dos emissores usando seus espaçamentos." />
+                  <input type="number" step="0.1" min="0.1" max="100" name="vazao_ip" value={formData.vazao_ip} onChange={handleChange} placeholder="Valor medido em mm/h" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="PAM – Porcentagem Área Molhada" tooltip="Porcentagem da área efetivamente molhada pelo sistema de irrigação (0,00–1,00). Ex: 0,40 = 40% para gotejamento, 1,00 = 100% para aspersão." />
@@ -412,18 +412,22 @@ export default function NovaArea() {
 
           {step === 5 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Profundidade de Controle</h2>
+              <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Critério de Monitoramento</h2>
               <p className="text-slate-500 text-sm">
-                Defina a profundidade de controle para análise de umidade do solo. Profundidade típica: 20–40 cm da superfície.
+                No próximo passo, informe individualmente a faixa de solo representada por cada tensiômetro. O cálculo será limitado à profundidade efetiva das raízes e fará a média de sensores que representam a mesma faixa.
               </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <FieldLabel label="Profundidade Mínima (cm)" tooltip="Profundidade mínima de interesse para análise de umidade. Normalmente 0–10 cm." />
-                  <input type="number" step="1" min="0" max="200" placeholder="Ex: 0" className={inputClass} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
+                  <p className="text-xs font-bold uppercase text-blue-600">Sensor de decisão</p>
+                  <p className="text-sm text-slate-600 mt-2">Define quando a tensão crítica foi atingida.</p>
                 </div>
-                <div>
-                  <FieldLabel label="Profundidade Máxima (cm)" tooltip="Profundidade máxima que a cultura extrai água. Deve coincidir com a profundidade efetiva das raízes." />
-                  <input type="number" step="1" min="0" max="200" placeholder="Ex: 60" className={inputClass} />
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
+                  <p className="text-xs font-bold uppercase text-slate-600">Sensor de controle</p>
+                  <p className="text-sm text-slate-600 mt-2">Monitora as camadas mais profundas e a qualidade da aplicação.</p>
+                </div>
+                <div className="rounded-xl bg-green-50 border border-green-100 p-4">
+                  <p className="text-xs font-bold uppercase text-green-700">Zona radicular</p>
+                  <p className="text-sm text-slate-600 mt-2">Limite atual: {formData.prof_raiz_mm || '--'} mm.</p>
                 </div>
               </div>
             </div>
@@ -434,7 +438,7 @@ export default function NovaArea() {
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                 <div className="flex items-center space-x-2">
                   <h2 className="text-xl font-bold text-slate-800">Tensiômetros</h2>
-                  <Tooltip text="Adicione os tensiômetros agrupados por setores da área. A profundidade sugerida é 20 cm para captar a zona radicular ativa.">
+                  <Tooltip text="Cadastre a função e a faixa representativa de cada instrumento conforme o plano de monitoramento definido pelo agrônomo.">
                     <Info size={16} className="text-blue-500 cursor-help" />
                   </Tooltip>
                 </div>
@@ -476,32 +480,83 @@ export default function NovaArea() {
                     </div>
                     <div className="p-4 space-y-3">
                       {setor.tensiometros.map((t, tIndex) => (
-                        <div key={t.id} className="flex items-center gap-4 bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
-                          <span className="font-bold text-slate-400 w-6 text-sm">{tIndex + 1}.</span>
-                          <div className="flex-1">
-                            <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Profundidade (cm)</label>
-                            <input
-                              type="number"
-                              value={t.prof_cm || ''}
-                              onChange={(e) => handleUpdateTensiometro(setor.id, t.id, parseInt(e.target.value) || 0)}
-                              className="w-full sm:w-32 p-1.5 rounded border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium"
-                              placeholder="Ex: 20"
-                              min={0}
-                              max={200}
-                              step={5}
-                            />
+                        <div key={t.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                          <div className="flex items-center justify-between mb-4">
+                            <span className="font-bold text-slate-700 text-sm">Tensiômetro {tIndex + 1}</span>
+                            <button
+                              onClick={() => handleRemoveTensiometro(setor.id, t.id)}
+                              disabled={setor.tensiometros.length === 1}
+                              className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
+                              title="Remover Tensiômetro"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
-                          <div className="text-xs text-slate-400 w-24 leading-tight">
-                            Sugerido: 20 cm
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Instalação (cm)</label>
+                              <input
+                                type="number"
+                                value={t.prof_cm}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { prof_cm: parseFloat(e.target.value) || 0 })}
+                                className={inputClass}
+                                min={0}
+                                max={200}
+                                step={1}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Camada inicial (cm)</label>
+                              <input
+                                type="number"
+                                value={t.camada_inicio_cm}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { camada_inicio_cm: parseFloat(e.target.value) || 0 })}
+                                className={inputClass}
+                                min={0}
+                                max={200}
+                                step={1}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Camada final (cm)</label>
+                              <input
+                                type="number"
+                                value={t.camada_fim_cm}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { camada_fim_cm: parseFloat(e.target.value) || 0 })}
+                                className={inputClass}
+                                min={1}
+                                max={200}
+                                step={1}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Função</label>
+                              <select
+                                value={t.tipo}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { tipo: e.target.value as 'decisao' | 'controle' })}
+                                className={`${inputClass} bg-white`}
+                              >
+                                <option value="decisao">Decisão</option>
+                                <option value="controle">Controle</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Tensão crítica (kPa)</label>
+                              <input
+                                type="number"
+                                value={t.tensao_critica}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { tensao_critica: parseFloat(e.target.value) || 0 })}
+                                className={inputClass}
+                                min={0.1}
+                                max={100}
+                                step={0.1}
+                                disabled={t.tipo === 'controle'}
+                              />
+                            </div>
                           </div>
-                          <button
-                            onClick={() => handleRemoveTensiometro(setor.id, t.id)}
-                            disabled={setor.tensiometros.length === 1}
-                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 transition-colors"
-                            title="Remover Tensiômetro"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          <p className="text-xs text-slate-400 mt-3">
+                            {t.tipo === 'decisao' ? 'Participa da média que dispara a irrigação.' : 'Não dispara a irrigação; participa do cálculo da umidade na camada monitorada.'}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -534,7 +589,7 @@ export default function NovaArea() {
               className="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 transition-colors flex items-center"
             >
               <Check size={20} className="mr-2" />
-              Finalizar Cadastro
+              {areaEmEdicao ? 'Salvar Alterações' : 'Finalizar Cadastro'}
             </button>
           )}
         </div>

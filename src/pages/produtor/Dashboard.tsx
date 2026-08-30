@@ -9,6 +9,7 @@ import { Produtor } from '../../types';
 import { salvarUsuario } from '../../lib/usuarioService';
 import { getAreaColor } from '../../lib/areaColors';
 import { MapController, UpdateMapCenter, LocationSelector, MapLegend } from '../../components/map/MapUtils';
+import { calcularIrrigacao } from '../../lib/irrigationMath';
 
 // Inicializa os ícones do leaflet
 initLeafletIcons();
@@ -21,9 +22,9 @@ export default function ProdutorDashboard() {
   // Filtra as áreas do produtor logado
   const minhasAreas = areas.filter(a => a.produtor_id === produtor.id);
   
-  const hoje = new Date().toISOString().split('T')[0];
+  const hoje = new Date().toDateString();
   const areasComLeituraHoje = minhasAreas.filter(area => 
-    leituras.some(l => l.area_id === area.id && l.data.startsWith(hoje))
+    leituras.some(l => l.area_id === area.id && new Date(l.data).toDateString() === hoje)
   );
 
   const leiturasPendentes = minhasAreas.length - areasComLeituraHoje.length;
@@ -259,7 +260,19 @@ export default function ProdutorDashboard() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {minhasAreas.map(area => {
-              const temLeituraHoje = leituras.some(l => l.area_id === area.id && l.data.startsWith(hoje));
+              const leiturasHoje = leituras
+                .filter(l => l.area_id === area.id && new Date(l.data).toDateString() === hoje)
+                .sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+              const leituraHoje = leiturasHoje[0];
+              const temLeituraHoje = Boolean(leituraHoje);
+              let resultadoHoje = null;
+              if (leituraHoje) {
+                try {
+                  resultadoHoje = calcularIrrigacao(area, leituraHoje.valores);
+                } catch {
+                  resultadoHoje = null;
+                }
+              }
               const ac = getAreaColor(area.id);
               const glowShadow = 'inset 0 0 20px ' + ac.fill + '44, 0 0 25px ' + ac.fill + '33, 0 0 0 2px ' + ac.stroke + '22';
               
@@ -284,12 +297,16 @@ export default function ProdutorDashboard() {
                       <Droplet size={18} />
                       <div>
                         <p className="text-[10px] uppercase font-bold text-blue-500">Condição do solo</p>
-                        <p className={"font-bold " + (!temLeituraHoje && 'text-slate-400')}>{temLeituraHoje ? 'Ideal' : 'Desconhecida'}</p>
+                        <p className={"font-bold " + (!temLeituraHoje ? 'text-slate-400' : resultadoHoje?.necessitaIrrigacao ? 'text-blue-700' : 'text-green-700')}>
+                          {!temLeituraHoje ? 'Desconhecida' : !resultadoHoje ? 'Parâmetros inválidos' : resultadoHoje.necessitaIrrigacao ? 'Irrigar' : 'Não irrigar'}
+                        </p>
                       </div>
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] uppercase font-bold text-slate-400">Umidade</p>
-                      <p className={"font-black " + (temLeituraHoje ? 'text-slate-800' : 'text-slate-400')}>{temLeituraHoje ? '28.6%' : '--%'}</p>
+                      <p className={"font-black " + (temLeituraHoje ? 'text-slate-800' : 'text-slate-400')}>
+                        {resultadoHoje?.umidadeMedia !== null && resultadoHoje?.umidadeMedia !== undefined ? `${(resultadoHoje.umidadeMedia * 100).toFixed(1)}%` : '--%'}
+                      </p>
                     </div>
                   </div>
 

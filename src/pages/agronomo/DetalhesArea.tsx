@@ -7,6 +7,7 @@ import { getAreaColor } from '../../lib/areaColors';
 import { ArrowLeft, Droplet, Sprout, Calendar, Clock, Activity, AlertTriangle, CheckCircle2, CloudRain, Edit3, Trash2, User, MapPin, Waves, Gauge } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { calcularIrrigacao, ResultadoIrrigacao } from '../../lib/irrigationMath';
 
 initLeafletIcons();
 
@@ -46,30 +47,29 @@ export default function DetalhesAreaAgronomo() {
   }
 
   const ultimaLeitura = leiturasArea[0];
-  const hoje = new Date().toISOString().split('T')[0];
-  const temLeituraHoje = ultimaLeitura && ultimaLeitura.data.startsWith(hoje);
-
-  const mediaTensiometro = ultimaLeitura
-    ? ultimaLeitura.valores.reduce((acc, curr) => acc + curr.leitura_kpa, 0) / ultimaLeitura.valores.length
-    : null;
+  const hoje = new Date().toDateString();
+  const temLeituraHoje = ultimaLeitura && new Date(ultimaLeitura.data).toDateString() === hoje;
+  let resultadoAtual: ResultadoIrrigacao | null = null;
+  if (ultimaLeitura) {
+    try {
+      resultadoAtual = calcularIrrigacao(area, ultimaLeitura.valores);
+    } catch {
+      resultadoAtual = null;
+    }
+  }
 
   let statusGeral = { text: 'Desconhecido', color: 'text-slate-500', bg: 'bg-slate-100', borderColor: 'border-slate-200', icon: <AlertTriangle size={24} /> };
   let recomendacao = 'Nenhuma leitura recente.';
 
-  if (mediaTensiometro !== null) {
-    if (mediaTensiometro < 20) {
-      statusGeral = { text: 'Solo Úmido', color: 'text-blue-700', bg: 'bg-blue-50', borderColor: 'border-blue-200', icon: <CloudRain size={24} className="text-blue-600" /> };
-      recomendacao = 'O solo está com boa umidade. Não é necessário irrigar no momento.';
-    } else if (mediaTensiometro < 50) {
-      statusGeral = { text: 'Condição Ideal', color: 'text-green-700', bg: 'bg-green-50', borderColor: 'border-green-200', icon: <CheckCircle2 size={24} className="text-green-600" /> };
-      recomendacao = 'O solo apresenta condições ideais. Continue monitorando.';
-    } else if (mediaTensiometro < 70) {
-      statusGeral = { text: 'Atenção', color: 'text-amber-700', bg: 'bg-amber-50', borderColor: 'border-amber-200', icon: <AlertTriangle size={24} className="text-amber-600" /> };
-      recomendacao = 'O solo está começando a secar. Prepare-se para irrigar em breve.';
-    } else {
-      statusGeral = { text: 'Crítico / Seco', color: 'text-red-700', bg: 'bg-red-50', borderColor: 'border-red-200', icon: <AlertTriangle size={24} className="text-red-600" /> };
-      recomendacao = 'O solo está muito seco! Recomendamos iniciar a irrigação.';
-    }
+  if (ultimaLeitura && !resultadoAtual) {
+    statusGeral = { text: 'Parâmetros inválidos', color: 'text-red-700', bg: 'bg-red-50', borderColor: 'border-red-200', icon: <AlertTriangle size={24} className="text-red-600" /> };
+    recomendacao = 'Revise os parâmetros técnicos antes de emitir uma recomendação.';
+  } else if (resultadoAtual?.necessitaIrrigacao) {
+    statusGeral = { text: 'Irrigação necessária', color: 'text-blue-700', bg: 'bg-blue-50', borderColor: 'border-blue-200', icon: <Droplet size={24} className="text-blue-600" /> };
+    recomendacao = `${resultadoAtual.mensagem}. Lâmina líquida: ${resultadoAtual.laminaLiquidaMm.toFixed(1)} mm; lâmina bruta: ${resultadoAtual.laminaBrutaMm.toFixed(1)} mm.`;
+  } else if (resultadoAtual) {
+    statusGeral = { text: 'Não irrigar', color: 'text-green-700', bg: 'bg-green-50', borderColor: 'border-green-200', icon: <CheckCircle2 size={24} className="text-green-600" /> };
+    recomendacao = resultadoAtual.mensagem;
   }
 
   const positions = area.poligono?.map(p => [p.lat, p.lng] as [number, number]);
@@ -80,8 +80,7 @@ export default function DetalhesAreaAgronomo() {
   };
 
   const handleEdit = () => {
-    // Por enquanto redireciona para dashboard; futuro: página de edição
-    navigate('/agronomo/dashboard');
+    navigate(`/agronomo/areas/${area.id}/editar`);
   };
 
   return (
@@ -303,10 +302,12 @@ export default function DetalhesAreaAgronomo() {
                 const dataLeitura = parseISO(leitura.data);
                 const mediaKpa = leitura.valores.reduce((acc, curr) => acc + curr.leitura_kpa, 0) / leitura.valores.length;
 
-                let textColor = 'text-green-600';
-                if (mediaKpa > 50) textColor = 'text-amber-600';
-                if (mediaKpa > 70) textColor = 'text-red-600';
-                if (mediaKpa < 20) textColor = 'text-blue-600';
+                let textColor = 'text-slate-600';
+                try {
+                  textColor = calcularIrrigacao(area, leitura.valores).necessitaIrrigacao ? 'text-blue-600' : 'text-green-600';
+                } catch {
+                  textColor = 'text-red-600';
+                }
 
                 return (
                   <div key={leitura.id} className={`p-4 rounded-xl border ${index === 0 ? 'bg-slate-50 border-slate-200 shadow-sm' : 'border-slate-100 hover:bg-slate-50 transition-colors'}`}>

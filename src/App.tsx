@@ -53,6 +53,7 @@ export default function App() {
           <Route path="/agronomo" element={<AgronomoLayout />}>
             <Route path="dashboard" element={<AgronomoDashboard />} />
             <Route path="areas/nova" element={<NovaArea />} />
+            <Route path="areas/:areaId/editar" element={<NovaArea />} />
             <Route path="areas/:areaId" element={<AgronomoDetalhesArea />} />
             <Route index element={<Navigate to="dashboard" replace />} />
           </Route>

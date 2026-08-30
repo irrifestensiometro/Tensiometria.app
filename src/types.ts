@@ -20,6 +20,7 @@ export interface Tensiometro {
   camada_inicio_cm: number;
   camada_fim_cm: number;
   is_controle: boolean;
+  tipo?: 'decisao' | 'controle';
   tensao_critica: number;
 }
 
