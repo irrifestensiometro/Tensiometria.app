@@ -4,12 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev": "vite --port=3000 --host=localhost",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/lib/irrigationMath.test.ts"
+    "test": "tsx --test src/lib/irrigationMath.test.ts",
+    "provision:admin": "tsx scripts/create-admin.ts",
+    "provision:user": "tsx scripts/provision-user.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -38,6 +40,7 @@
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "firebase-admin": "^13.10.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

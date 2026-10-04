@@ -9,7 +9,8 @@ export interface ResultadoCamadaIrrigacao {
   sensoresConsiderados: number;
 }
 
-export interface ResultadoIrrigacao {
+export interface ResultadoSetorIrrigacao {
+  setor: string;
   necessitaIrrigacao: boolean;
   tempoHoras: number;
   mensagem: string;
@@ -19,6 +20,10 @@ export interface ResultadoIrrigacao {
   tensaoCriticaKpa: number | null;
   umidadeMedia: number | null;
   camadas: ResultadoCamadaIrrigacao[];
+}
+
+export interface ResultadoIrrigacao {
+  setores: ResultadoSetorIrrigacao[];
 }
 
 export class ErroCalculoIrrigacao extends Error {
@@ -32,6 +37,21 @@ const numeroFinito = (valor: number) => Number.isFinite(valor);
 
 function sensorEhControle(sensor: Tensiometro) {
   return sensor.tipo === 'controle' || sensor.is_controle;
+}
+
+function nomeDoSetor(sensor: Tensiometro) {
+  return sensor.setor?.trim() || 'Tensiômetros';
+}
+
+function agruparSensoresPorSetor(sensores: Tensiometro[]) {
+  const grupos = new Map<string, Tensiometro[]>();
+  sensores.forEach((sensor) => {
+    const nome = nomeDoSetor(sensor);
+    const grupo = grupos.get(nome) || [];
+    grupo.push(sensor);
+    grupos.set(nome, grupo);
+  });
+  return grupos;
 }
 
 export function validarParametrosIrrigacao(area: Area, leituras?: LeituraValor[]): string[] {
@@ -49,48 +69,54 @@ export function validarParametrosIrrigacao(area: Area, leituras?: LeituraValor[]
   if (area.tensiometros.length === 0) problemas.push('Cadastre ao menos um tensiômetro.');
 
   const ids = new Set<string>();
-  area.tensiometros.forEach((sensor, indice) => {
-    const nome = `Tensiômetro ${indice + 1}`;
-    if (ids.has(sensor.id)) problemas.push(`${nome} possui identificador duplicado.`);
-    ids.add(sensor.id);
-    if (!numeroFinito(sensor.prof_cm) || sensor.prof_cm < 0) problemas.push(`${nome}: profundidade de instalação inválida.`);
-    if (!numeroFinito(sensor.camada_inicio_cm) || sensor.camada_inicio_cm < 0) problemas.push(`${nome}: início da camada inválido.`);
-    if (!numeroFinito(sensor.camada_fim_cm) || sensor.camada_fim_cm <= sensor.camada_inicio_cm) problemas.push(`${nome}: o fim da camada deve ser maior que o início.`);
-    if (!sensorEhControle(sensor) && (!numeroFinito(sensor.tensao_critica) || sensor.tensao_critica <= 0)) {
-      problemas.push(`${nome}: informe uma tensão crítica maior que zero para o sensor de decisão.`);
-    }
-  });
+  const leiturasPorSensor = leituras
+    ? new Map(leituras.map(leitura => [leitura.tensiometro_id, leitura.leitura_kpa]))
+    : null;
 
-  if (area.tensiometros.length > 0 && !area.tensiometros.some(sensor => !sensorEhControle(sensor))) {
-    problemas.push('Cadastre ao menos um tensiômetro de decisão.');
-  }
-
-  if (numeroFinito(area.planta.prof_raiz_mm) && area.planta.prof_raiz_mm > 0) {
-    const faixasNaRaiz = area.tensiometros
-      .map(sensor => ({
+  for (const [setor, sensores] of agruparSensoresPorSetor(area.tensiometros)) {
+    const sensoresDoSetor = sensores.map((sensor, indice) => {
+      const nome = `Setor "${setor}", tensiômetro ${indice + 1}`;
+      if (ids.has(sensor.id)) problemas.push(`${nome}: identificador duplicado.`);
+      ids.add(sensor.id);
+      if (!numeroFinito(sensor.prof_cm) || sensor.prof_cm < 0) problemas.push(`${nome}: profundidade de instalação inválida.`);
+      if (!numeroFinito(sensor.camada_inicio_cm) || sensor.camada_inicio_cm < 0) problemas.push(`${nome}: início da camada inválido.`);
+      if (!numeroFinito(sensor.camada_fim_cm) || sensor.camada_fim_cm <= sensor.camada_inicio_cm) {
+        problemas.push(`${nome}: o fim da camada deve ser maior que o início.`);
+      }
+      if (!sensorEhControle(sensor) && (!numeroFinito(sensor.tensao_critica) || sensor.tensao_critica <= 0)) {
+        problemas.push(`${nome}: informe uma tensão crítica maior que zero para o sensor de decisão.`);
+      }
+      if (leiturasPorSensor) {
+        const valor = leiturasPorSensor.get(sensor.id);
+        if (valor === undefined) problemas.push(`Falta a leitura do tensiômetro ${indice + 1} do setor "${setor}".`);
+        else if (!numeroFinito(valor) || valor < 0) {
+          problemas.push(`A leitura do tensiômetro ${indice + 1} do setor "${setor}" deve ser maior ou igual a zero.`);
+        }
+      }
+      return {
         inicio: Math.max(0, sensor.camada_inicio_cm * 10),
         fim: Math.min(area.planta.prof_raiz_mm, sensor.camada_fim_cm * 10),
-      }))
-      .filter(faixa => numeroFinito(faixa.inicio) && numeroFinito(faixa.fim) && faixa.fim > faixa.inicio)
-      .sort((a, b) => a.inicio - b.inicio);
-    let coberturaAteMm = 0;
-    let possuiLacuna = false;
-    for (const faixa of faixasNaRaiz) {
-      if (faixa.inicio > coberturaAteMm) possuiLacuna = true;
-      coberturaAteMm = Math.max(coberturaAteMm, faixa.fim);
-    }
-    if (possuiLacuna || coberturaAteMm < area.planta.prof_raiz_mm) {
-      problemas.push('As camadas monitoradas devem cobrir toda a zona radicular, sem lacunas.');
-    }
-  }
-
-  if (leituras) {
-    const leiturasPorSensor = new Map(leituras.map(leitura => [leitura.tensiometro_id, leitura.leitura_kpa]));
-    area.tensiometros.forEach((sensor, indice) => {
-      const valor = leiturasPorSensor.get(sensor.id);
-      if (valor === undefined) problemas.push(`Falta a leitura do tensiômetro ${indice + 1}.`);
-      else if (!numeroFinito(valor) || valor < 0) problemas.push(`A leitura do tensiômetro ${indice + 1} deve ser um número maior ou igual a zero.`);
+      };
     });
+
+    if (!sensores.some(sensor => !sensorEhControle(sensor))) {
+      problemas.push(`O setor "${setor}" precisa de ao menos um tensiômetro de decisão.`);
+    }
+
+    if (numeroFinito(area.planta.prof_raiz_mm) && area.planta.prof_raiz_mm > 0) {
+      const faixas = sensoresDoSetor
+        .filter(faixa => numeroFinito(faixa.inicio) && numeroFinito(faixa.fim) && faixa.fim > faixa.inicio)
+        .sort((faixaA, faixaB) => faixaA.inicio - faixaB.inicio);
+      let coberturaAteMm = 0;
+      let possuiLacuna = false;
+      for (const faixa of faixas) {
+        if (faixa.inicio > coberturaAteMm) possuiLacuna = true;
+        coberturaAteMm = Math.max(coberturaAteMm, faixa.fim);
+      }
+      if (possuiLacuna || coberturaAteMm < area.planta.prof_raiz_mm) {
+        problemas.push(`As camadas dos tensiômetros do setor "${setor}" devem cobrir toda a zona radicular, sem lacunas.`);
+      }
+    }
   }
 
   return problemas;
@@ -111,12 +137,13 @@ function formatarTempo(horasDecimais: number): string {
   return `Irrigar por ${minutos}min`;
 }
 
-export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): ResultadoIrrigacao {
-  const problemas = validarParametrosIrrigacao(area, leituras);
-  if (problemas.length > 0) throw new ErroCalculoIrrigacao(problemas);
-
-  const leiturasPorSensor = new Map(leituras.map(leitura => [leitura.tensiometro_id, leitura.leitura_kpa]));
-  const sensoresDecisao = area.tensiometros.filter(sensor => !sensorEhControle(sensor));
+function calcularResultadoSetor(
+  area: Area,
+  setor: string,
+  sensores: Tensiometro[],
+  leiturasPorSensor: Map<string, number>,
+): ResultadoSetorIrrigacao {
+  const sensoresDecisao = sensores.filter(sensor => !sensorEhControle(sensor));
   const desviosDoGatilho = sensoresDecisao.map(sensor => leiturasPorSensor.get(sensor.id)! - sensor.tensao_critica);
   const tensaoDecisaoKpa = sensoresDecisao.reduce((soma, sensor) => soma + leiturasPorSensor.get(sensor.id)!, 0) / sensoresDecisao.length;
   const tensaoCriticaKpa = sensoresDecisao.reduce((soma, sensor) => soma + sensor.tensao_critica, 0) / sensoresDecisao.length;
@@ -124,6 +151,7 @@ export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): Resulta
 
   if (!atingiuGatilho) {
     return {
+      setor,
       necessitaIrrigacao: false,
       tempoHoras: 0,
       mensagem: 'Tensão abaixo do limite de decisão. Não irrigar hoje.',
@@ -137,21 +165,14 @@ export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): Resulta
   }
 
   const profundidadeRaizMm = area.planta.prof_raiz_mm;
-  const sensoresComFaixa = area.tensiometros
+  const sensoresComFaixa = sensores
     .map(sensor => ({
-      sensor,
       inicioMm: Math.max(0, sensor.camada_inicio_cm * 10),
       fimMm: Math.min(profundidadeRaizMm, sensor.camada_fim_cm * 10),
       umidade: calcularUmidadeAtual(area, leiturasPorSensor.get(sensor.id)!),
     }))
     .filter(item => item.fimMm > item.inicioMm);
 
-  if (sensoresComFaixa.length === 0) {
-    throw new ErroCalculoIrrigacao(['Nenhuma camada dos tensiômetros intercepta a zona radicular.']);
-  }
-
-  // Intervalos não sobrepostos impedem que repetições em setores diferentes
-  // sejam somadas como se fossem novas camadas verticais.
   const limites = Array.from(new Set(sensoresComFaixa.flatMap(item => [item.inicioMm, item.fimMm]))).sort((a, b) => a - b);
   const camadas: ResultadoCamadaIrrigacao[] = [];
 
@@ -179,6 +200,7 @@ export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): Resulta
 
   if (laminaLiquidaMm <= 0) {
     return {
+      setor,
       necessitaIrrigacao: false,
       tempoHoras: 0,
       mensagem: 'O perfil monitorado está na capacidade de campo. Não irrigar hoje.',
@@ -192,6 +214,7 @@ export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): Resulta
   }
 
   return {
+    setor,
     necessitaIrrigacao: true,
     tempoHoras,
     mensagem: formatarTempo(tempoHoras),
@@ -202,4 +225,16 @@ export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): Resulta
     umidadeMedia,
     camadas,
   };
+}
+
+export function calcularIrrigacao(area: Area, leituras: LeituraValor[]): ResultadoIrrigacao {
+  const problemas = validarParametrosIrrigacao(area, leituras);
+  if (problemas.length > 0) throw new ErroCalculoIrrigacao(problemas);
+
+  const leiturasPorSensor = new Map(leituras.map(leitura => [leitura.tensiometro_id, leitura.leitura_kpa]));
+  const setores = Array.from(agruparSensoresPorSetor(area.tensiometros), ([nome, sensores]) =>
+    calcularResultadoSetor(area, nome, sensores, leiturasPorSensor),
+  );
+
+  return { setores };
 }

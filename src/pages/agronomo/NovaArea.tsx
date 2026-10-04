@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles } from 'lucide-react';
-import { Area, Produtor } from '../../types';
+import { Area } from '../../types';
 import { validarParametrosIrrigacao } from '../../lib/irrigationMath';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, LayersControl } from 'react-leaflet';
+import { MapContainer, Polygon, Marker, Popup } from 'react-leaflet';
 import { initLeafletIcons } from '../../lib/leaflet-setup';
 import { PolygonDrawer } from '../../components/map/MapUtils';
+import { HybridSatelliteTiles } from '../../components/map/HybridSatelliteTiles';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { FieldLabel } from '../../components/ui/FieldLabel';
 
@@ -28,7 +29,7 @@ const SUGESTOES_CULTURA = [
 export default function NovaArea() {
   const navigate = useNavigate();
   const { areaId } = useParams();
-  const { produtores, currentUser, areas, addArea, updateArea } = useAppContext();
+  const { currentUser, areas, produtores, addArea, updateArea } = useAppContext();
   const areaEmEdicao = areaId ? areas.find(area => area.id === areaId) : undefined;
 
   const [step, setStep] = useState(1);
@@ -47,24 +48,24 @@ export default function NovaArea() {
   });
 
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
-  const [selectedProdutor, setSelectedProdutor] = useState<Produtor | null>(null);
-
   const [culturaSugerida, setCulturaSugerida] = useState('');
   const [formError, setFormError] = useState<string[]>([]);
   const [edicaoCarregada, setEdicaoCarregada] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (formData.produtor_id) {
-      const prod = produtores.find(p => p.id === formData.produtor_id);
-      setSelectedProdutor(prod || null);
-    } else {
-      setSelectedProdutor(null);
-    }
-  }, [formData.produtor_id, produtores]);
-
-  const mapCenter: [number, number] = selectedProdutor?.localizacao_sede
-    ? [selectedProdutor.localizacao_sede.lat, selectedProdutor.localizacao_sede.lng]
-    : [-20.3155, -40.3128];
+  const produtorSelecionado = produtores.find((produtor) => produtor.id === formData.produtor_id);
+  const localizacaoProdutor = produtorSelecionado?.localizacao_sede
+    ? [produtorSelecionado.localizacao_sede.lat, produtorSelecionado.localizacao_sede.lng] as [number, number]
+    : null;
+  const centroAreaExistente = areaEmEdicao?.poligono?.length
+    ? [
+        areaEmEdicao.poligono.reduce((soma, ponto) => soma + ponto.lat, 0) / areaEmEdicao.poligono.length,
+        areaEmEdicao.poligono.reduce((soma, ponto) => soma + ponto.lng, 0) / areaEmEdicao.poligono.length,
+      ] as [number, number]
+    : null;
+  const mapCenter: [number, number] = centroAreaExistente
+    || localizacaoProdutor
+    || [-20.3155, -40.3128];
 
   type SetorForm = {
     id: string;
@@ -124,10 +125,124 @@ export default function NovaArea() {
   }, [areaEmEdicao, edicaoCarregada]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setFormError([]);
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  const handlePolygonPointsChange: React.Dispatch<React.SetStateAction<[number, number][]>> = (points) => {
+    setFormError([]);
+    setPolygonPoints(points);
+  };
+
+  const criarRascunhoArea = (): Area => ({
+    id: areaEmEdicao?.id || `area_${Date.now()}`,
+    agronomo_id: areaEmEdicao?.agronomo_id || currentUser!.id,
+    produtor_id: formData.produtor_id,
+    nome: formData.nome,
+    ...(polygonPoints.length > 0
+      ? { poligono: polygonPoints.map(([lat, lng]) => ({ lat, lng })) }
+      : {}),
+    solo: {
+      coef_a: Number(formData.coef_a),
+      coef_b: Number(formData.coef_b),
+      umidade_cc: Number(formData.umidade_cc),
+    },
+    planta: {
+      prof_raiz_mm: Number(formData.prof_raiz_mm),
+    },
+    irrigacao: {
+      eficiencia_ea: Number(formData.eficiencia_ea),
+      vazao_ip: Number(formData.vazao_ip),
+      pam: Number(formData.pam),
+    },
+    tensiometros: setores.flatMap((setor) => setor.tensiometros.map((sensor) => ({
+      id: sensor.id,
+      prof_cm: sensor.prof_cm,
+      setor: setor.nome,
+      camada_inicio_cm: sensor.camada_inicio_cm,
+      camada_fim_cm: sensor.camada_fim_cm,
+      tipo: sensor.tipo,
+      is_controle: sensor.tipo === 'controle',
+      tensao_critica: sensor.tensao_critica,
+    }))),
+  });
+
+  const validarEtapaAtual = () => {
+    if (step === 1) {
+      return [
+        ...(!formData.nome.trim() ? ['Informe o nome da área.'] : []),
+        ...(!formData.produtor_id ? ['Selecione o produtor vinculado.'] : []),
+      ];
+    }
+
+    if (step === 2) {
+      return polygonPoints.length > 0 && polygonPoints.length < 3
+        ? ['Adicione ao menos 3 pontos para completar o desenho da área, ou remova os pontos e deixe o mapa sem desenho.']
+        : [];
+    }
+
+    if (step === 3) {
+      const problems: string[] = [];
+      const values = [
+        ['Coeficiente A', formData.coef_a, 0.001, 1.5],
+        ['Coeficiente B', formData.coef_b, 0.001, 2],
+        ['Umidade na capacidade de campo', formData.umidade_cc, 0.01, 1],
+        ['Profundidade radicular', formData.prof_raiz_mm, 50, 2000],
+      ] as const;
+
+      for (const [label, rawValue, minimum, maximum] of values) {
+        const value = Number(rawValue);
+        if (!rawValue.trim() || !Number.isFinite(value) || value < minimum || value > maximum) {
+          problems.push(`${label}: informe um valor entre ${minimum} e ${maximum}.`);
+        }
+      }
+      return problems;
+    }
+
+    if (step === 4) {
+      const problems: string[] = [];
+      const values = [
+        ['Eficiência de aplicação', formData.eficiencia_ea, 0.01, 1],
+        ['Intensidade de aplicação', formData.vazao_ip, 0.1, 100],
+        ['PAM', formData.pam, 0.05, 1],
+      ] as const;
+
+      for (const [label, rawValue, minimum, maximum] of values) {
+        const value = Number(rawValue);
+        if (!rawValue.trim() || !Number.isFinite(value) || value < minimum || value > maximum) {
+          problems.push(`${label}: informe um valor entre ${minimum} e ${maximum}.`);
+        }
+      }
+      return problems;
+    }
+
+    if (step === 6) {
+      const nomesSetores = new Set<string>();
+      const problemasNomes = setores.flatMap((setor) => {
+        const nome = setor.nome.trim();
+        const normalizado = nome.toLocaleLowerCase('pt-BR');
+        if (!nome) return ['Informe um nome para cada setor.'];
+        if (nomesSetores.has(normalizado)) return [`O nome do setor "${nome}" está repetido.`];
+        nomesSetores.add(normalizado);
+        return [];
+      });
+      const problemasSensores = validarParametrosIrrigacao(criarRascunhoArea()).filter((problem) =>
+        /tensiômetro|tensiometro|camadas monitoradas|zona radicular/i.test(problem),
+      );
+      return [...problemasNomes, ...problemasSensores];
+    }
+
+    return [];
+  };
+
+  const handleNextStep = () => {
+    const problems = validarEtapaAtual();
+    setFormError(problems);
+    if (problems.length === 0) setStep((currentStep) => currentStep + 1);
+  };
+
   const handleAddSetor = () => {
+    setFormError([]);
     setSetores([
       ...setores,
       { id: `setor_${Date.now()}`, nome: `Setor ${setores.length + 1}`, tensiometros: [novoTensiometro('_1')] }
@@ -135,25 +250,29 @@ export default function NovaArea() {
   };
 
   const handleUpdateSetorName = (setId: string, nome: string) => {
+    setFormError([]);
     setSetores(setores.map(s => s.id === setId ? { ...s, nome } : s));
   };
 
   const handleRemoveSetor = (setId: string) => {
+    setFormError([]);
     if (setores.length > 1) {
       setSetores(setores.filter(s => s.id !== setId));
     }
   };
 
   const handleAddTensiometro = (setId: string) => {
+    setFormError([]);
     setSetores(setores.map(s => {
       if (s.id === setId) {
-        return { ...s, tensiometros: [...s.tensiometros, { ...novoTensiometro(`_${Math.random()}`), tipo: 'controle' }] };
+        return { ...s, tensiometros: [...s.tensiometros, novoTensiometro(`_${Math.random()}`)] };
       }
       return s;
     }));
   };
 
   const handleUpdateTensiometro = (setId: string, tId: string, alteracoes: Partial<SetorForm['tensiometros'][number]>) => {
+    setFormError([]);
     setSetores(setores.map(s => {
       if (s.id === setId) {
         return {
@@ -166,6 +285,7 @@ export default function NovaArea() {
   };
 
   const handleRemoveTensiometro = (setId: string, tId: string) => {
+    setFormError([]);
     setSetores(setores.map(s => {
       if (s.id === setId) {
         if (s.tensiometros.length > 1) {
@@ -176,51 +296,26 @@ export default function NovaArea() {
     }));
   };
 
-  const handleFinish = () => {
-    const novaArea: Area = {
-      id: areaEmEdicao?.id || `area_${Date.now()}`,
-      agronomo_id: areaEmEdicao?.agronomo_id || currentUser!.id,
-      produtor_id: formData.produtor_id,
-      nome: formData.nome,
-      poligono: polygonPoints.map(p => ({ lat: p[0], lng: p[1] })),
-      solo: {
-        coef_a: parseFloat(formData.coef_a) || 0,
-        coef_b: parseFloat(formData.coef_b) || 0,
-        umidade_cc: parseFloat(formData.umidade_cc) || 0
-      },
-      planta: {
-        prof_raiz_mm: parseFloat(formData.prof_raiz_mm) || 0
-      },
-      irrigacao: {
-        eficiencia_ea: parseFloat(formData.eficiencia_ea) || 0,
-        vazao_ip: parseFloat(formData.vazao_ip) || 0,
-        pam: parseFloat(formData.pam) || 0
-      },
-      tensiometros: setores.flatMap(s => s.tensiometros.map(t => ({
-        id: t.id,
-        prof_cm: t.prof_cm,
-        setor: s.nome,
-        camada_inicio_cm: t.camada_inicio_cm,
-        camada_fim_cm: t.camada_fim_cm,
-        tipo: t.tipo,
-        is_controle: t.tipo === 'controle',
-        tensao_critica: t.tensao_critica
-      })))
-    };
-
-    const problemasGerais = [
-      ...(!novaArea.nome.trim() ? ['Informe o nome da área.'] : []),
-      ...(!novaArea.produtor_id ? ['Selecione o produtor vinculado.'] : []),
-      ...validarParametrosIrrigacao(novaArea),
-    ];
-    if (problemasGerais.length > 0) {
-      setFormError(problemasGerais);
+  const handleFinish = async () => {
+    const problemasEtapa = validarEtapaAtual();
+    setFormError(problemasEtapa);
+    if (problemasEtapa.length > 0) {
       return;
     }
 
-    if (areaEmEdicao) updateArea(novaArea);
-    else addArea(novaArea);
-    navigate('/agronomo/dashboard');
+    const novaArea = criarRascunhoArea();
+    setSaving(true);
+    try {
+      if (areaEmEdicao) await updateArea(novaArea);
+      else await addArea(novaArea);
+      navigate('/agronomo/dashboard');
+    } catch (error) {
+      setFormError([
+        `Não foi possível salvar a área: ${error instanceof Error ? error.message : 'erro desconhecido.'}`,
+      ]);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const aplicarCultura = (nome: string) => {
@@ -267,7 +362,7 @@ export default function NovaArea() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {formError.length > 0 && (
           <div className="m-6 mb-0 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <p className="font-bold mb-2">Revise os parâmetros antes de salvar:</p>
+            <p className="font-bold mb-2">Corrija esta etapa antes de continuar:</p>
             <ul className="list-disc pl-5 space-y-1">
               {formError.map(problema => <li key={problema}>{problema}</li>)}
             </ul>
@@ -284,12 +379,31 @@ export default function NovaArea() {
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Produtor Vinculado *</label>
-                  <select name="produtor_id" value={formData.produtor_id} onChange={handleChange} className={`${inputClass} bg-white`}>
-                    <option value="">Selecione o Produtor</option>
-                    {produtores.map(p => (
-                      <option key={p.id} value={p.id}>{p.nome}</option>
+                  <select
+                    name="produtor_id"
+                    value={formData.produtor_id}
+                    onChange={handleChange}
+                    className={`${inputClass} bg-white`}
+                    required
+                  >
+                    <option value="">Selecione o produtor</option>
+                    {areaEmEdicao
+                      && !produtores.some((produtor) => produtor.id === areaEmEdicao.produtor_id) && (
+                        <option value={areaEmEdicao.produtor_id}>
+                          Produtor já vinculado ({areaEmEdicao.produtor_id})
+                        </option>
+                      )}
+                    {produtores.map((produtor) => (
+                      <option key={produtor.id} value={produtor.id}>
+                        {produtor.nome}
+                      </option>
                     ))}
                   </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {produtores.length > 0
+                      ? 'A lista contém produtores cadastrados no sistema.'
+                      : 'Nenhum produtor aparece na lista. Peça ao produtor para entrar novamente ou sincronize os perfis existentes pelo comando administrativo.'}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Cultura</label>
@@ -317,7 +431,7 @@ export default function NovaArea() {
           {step === 2 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                <h2 className="text-xl font-bold text-slate-800">Desenhar Área no Mapa</h2>
+                <h2 className="text-xl font-bold text-slate-800">Localização da Área (opcional)</h2>
                 <button
                   onClick={() => setPolygonPoints([])}
                   className="text-sm font-bold text-red-600 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg"
@@ -326,32 +440,20 @@ export default function NovaArea() {
                 </button>
               </div>
               <p className="text-slate-500 text-sm">
-                Clique no mapa para criar os vértices da área de plantio.
-                {selectedProdutor?.localizacao_sede ? ' O mapa está centralizado na sede do produtor selecionado.' : ''}
+                {localizacaoProdutor
+                  ? `O mapa está centralizado na sede de ${produtorSelecionado?.nome}. Desenhar os limites da área é opcional; clique no mapa para marcar os vértices ou avance sem desenhar.`
+                  : 'Desenhar os limites da área é opcional. Clique no mapa para marcar os vértices ou avance sem desenhar; a posição exibida é apenas uma referência.'}
               </p>
 
               <div className="h-[400px] w-full rounded-xl overflow-hidden border border-slate-300 relative z-0">
                 <MapContainer center={mapCenter} zoom={14} scrollWheelZoom={true} className="h-full w-full">
-                  <LayersControl position="topright">
-                    <LayersControl.BaseLayer checked name="Mapa Padrão">
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      />
-                    </LayersControl.BaseLayer>
-                    <LayersControl.BaseLayer name="Satélite (Híbrido)">
-                      <TileLayer
-                        attribution='&copy; <a href="https://server.arcgisonline.com">Esri</a>'
-                        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                      />
-                    </LayersControl.BaseLayer>
-                  </LayersControl>
-                  {selectedProdutor?.localizacao_sede && (
-                    <Marker position={[selectedProdutor.localizacao_sede.lat, selectedProdutor.localizacao_sede.lng]}>
-                      <Popup>Sede: {selectedProdutor.nome}</Popup>
+                  <HybridSatelliteTiles />
+                  {localizacaoProdutor && (
+                    <Marker position={localizacaoProdutor}>
+                      <Popup>Sede de {produtorSelecionado?.nome}</Popup>
                     </Marker>
                   )}
-                  <PolygonDrawer points={polygonPoints} setPoints={setPolygonPoints} />
+                  <PolygonDrawer points={polygonPoints} setPoints={handlePolygonPointsChange} />
                 </MapContainer>
               </div>
             </div>
@@ -578,7 +680,7 @@ export default function NovaArea() {
 
           {step < totalSteps ? (
             <button
-              onClick={() => setStep(step + 1)}
+              onClick={handleNextStep}
               className="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
             >
               Próximo Passo
@@ -586,10 +688,11 @@ export default function NovaArea() {
           ) : (
             <button
               onClick={handleFinish}
+              disabled={saving}
               className="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 transition-colors flex items-center"
             >
               <Check size={20} className="mr-2" />
-              {areaEmEdicao ? 'Salvar Alterações' : 'Finalizar Cadastro'}
+              {saving ? 'Salvando...' : areaEmEdicao ? 'Salvar Alterações' : 'Finalizar Cadastro'}
             </button>
           )}
         </div>

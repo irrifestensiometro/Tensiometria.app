@@ -1,135 +1,135 @@
-import React, { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
-import { registerWithEmail, updateProfile } from '../../lib/firebase';
-import { salvarUsuario } from '../../lib/usuarioService';
-import { Map, Users, AlertTriangle, UserPlus, X, Plus, Sprout, CheckCircle2 } from 'lucide-react';
+import { Activity, Map, Users, Plus, CheckCircle2, UserPlus, X } from 'lucide-react';
 import { getAreaColor } from '../../lib/areaColors';
+import { criarContaDeAgronomo } from '../../lib/authService';
 
 export default function AgronomoDashboard() {
   const navigate = useNavigate();
-  const { areas, produtores, agronomos, addAgronomo } = useAppContext();
+  const { areas, produtores, currentUser } = useAppContext();
 
   const totalAreas = areas.length;
-  const totalProdutores = produtores.length;
-  
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [novoAgronomo, setNovoAgronomo] = useState({ nome: '', email: '', senha: '' });
-  const [addError, setAddError] = useState('');
+  const totalProdutores = new Set(areas.map((area) => area.produtor_id)).size;
+  const totalTensiometros = areas.reduce((total, area) => total + area.tensiometros.length, 0);
+  const totalSetores = areas.reduce((total, area) => (
+    total + new Set(area.tensiometros.map((sensor) => sensor.setor?.trim() || 'Tensiômetros')).size
+  ), 0);
+  const [showCreateAgronomist, setShowCreateAgronomist] = useState(false);
+  const [newAgronomist, setNewAgronomist] = useState({ nome: '', email: '', password: '' });
+  const [createError, setCreateError] = useState('');
+  const [creating, setCreating] = useState(false);
 
-  const handleAddAgronomo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAddError('');
-    if (!novoAgronomo.nome || !novoAgronomo.email) return;
-
-    const senha = novoAgronomo.senha || '123456';
+  const handleCreateAgronomist = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreateError('');
+    setCreating(true);
     try {
-      const credencial = await registerWithEmail(novoAgronomo.email, senha);
-      await updateProfile(credencial.user, { displayName: novoAgronomo.nome });
-      await salvarUsuario(credencial.user.uid, {
-        nome: novoAgronomo.nome,
-        email: novoAgronomo.email,
-        tipo: 'agronomo',
-      });
-      addAgronomo({
-        id: credencial.user.uid,
-        nome: novoAgronomo.nome,
-        email: novoAgronomo.email,
-        senha,
-      });
-      setNovoAgronomo({ nome: '', email: '', senha: '' });
-      setIsAddModalOpen(false);
-    } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        setAddError('Este e-mail já está cadastrado.');
-      } else {
-        setAddError('Erro ao criar agrônomo. Tente novamente.');
-      }
+      await criarContaDeAgronomo(
+        newAgronomist.nome.trim(),
+        newAgronomist.email.trim(),
+        newAgronomist.password,
+      );
+      setNewAgronomist({ nome: '', email: '', password: '' });
+      setShowCreateAgronomist(false);
+      window.alert('Conta de agrônomo criada. O novo usuário já pode entrar com o e-mail e a senha cadastrados.');
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Não foi possível criar a conta.');
+    } finally {
+      setCreating(false);
     }
   };
 
   return (
-    <div className="space-y-10 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800 flex items-center">
-            Olá, Dr.! <span className="ml-2 text-2xl">👋</span>
+    <div className="space-y-7 sm:space-y-9 animate-in fade-in duration-500">
+      <section className="flex flex-col gap-5 rounded-3xl border border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-7">
+        <div className="min-w-0">
+          <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-emerald-800">Painel do agrônomo</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl lg:text-4xl">
+            Olá, {currentUser?.nome || 'Agrônomo'}
           </h1>
-          <p className="text-slate-500 mt-1">Bem-vindo ao seu painel de monitoramento agrícola</p>
+          <p className="mt-2 text-sm text-slate-600 sm:text-base">Acompanhe suas áreas e o monitoramento agrícola.</p>
         </div>
-        <button 
-          onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center justify-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 px-5 py-2.5 rounded-xl font-bold transition-colors border border-slate-200 shadow-sm"
+        <button
+          onClick={() => { setCreateError(''); setShowCreateAgronomist(true); }}
+          className="flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:w-auto"
         >
           <UserPlus size={18} />
-          <span>Novo Agrônomo</span>
+          <span>Novo agrônomo</span>
         </button>
-      </div>
+      </section>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-[#2D7D46] p-6 rounded-2xl shadow-sm text-white relative overflow-hidden">
-          <div className="absolute top-4 right-4 bg-white/20 p-2.5 rounded-xl">
+      <section aria-label="Resumo da conta" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+        <div className="relative overflow-hidden rounded-2xl bg-[#2D7D46] p-4 text-white shadow-sm sm:p-6">
+          <div className="absolute right-3 top-3 rounded-xl bg-white/20 p-2 sm:right-4 sm:top-4 sm:p-2.5">
             <Map size={20} className="text-white" />
           </div>
-          <p className="text-emerald-50 text-sm font-medium mb-2">Total de Áreas</p>
-          <h2 className="text-4xl font-bold mb-4">{totalAreas}</h2>
-          <p className="text-emerald-100 text-xs">Áreas cadastradas</p>
+          <p className="mb-2 pr-9 text-xs font-medium text-emerald-50 sm:text-sm">Áreas</p>
+          <h2 className="mb-2 text-3xl font-bold sm:mb-3 sm:text-4xl">{totalAreas}</h2>
+          <p className="text-[11px] text-emerald-100 sm:text-xs">Cadastradas no seu perfil</p>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative">
-          <div className="absolute top-4 right-4 bg-slate-100 p-2.5 rounded-xl">
+        <div className="relative rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+          <div className="absolute right-3 top-3 rounded-xl bg-slate-100 p-2 sm:right-4 sm:top-4 sm:p-2.5">
             <Users size={20} className="text-slate-500" />
           </div>
-          <p className="text-slate-500 text-sm font-medium mb-2">Produtores Vinculados</p>
-          <h2 className="text-4xl font-bold text-slate-800 mb-4">{totalProdutores}</h2>
-          <p className="text-slate-400 text-xs">Parceiros ativos</p>
+          <p className="mb-2 pr-8 text-xs font-medium text-slate-500 sm:text-sm">Produtores</p>
+          <h2 className="mb-2 text-3xl font-bold text-slate-800 sm:mb-3 sm:text-4xl">{totalProdutores}</h2>
+          <p className="text-[11px] text-slate-400 sm:text-xs">Com áreas vinculadas</p>
         </div>
         
-        <div className="bg-[#e9f5ec] p-6 rounded-2xl border border-[#d1e8d7] shadow-sm relative">
-          <div className="absolute top-4 right-4 bg-[#c8e6d1] p-2.5 rounded-xl">
-            <Sprout size={20} className="text-[#356b46]" />
+        <div className="relative rounded-2xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm sm:p-6">
+          <div className="absolute right-3 top-3 rounded-xl bg-emerald-100 p-2 sm:right-4 sm:top-4 sm:p-2.5">
+            <Activity size={20} className="text-[#356b46]" />
           </div>
-          <p className="text-slate-600 text-sm font-medium mb-2">Cultura Principal</p>
-          <h2 className="text-4xl font-bold text-slate-800 mb-4">Milho</h2>
-          <p className="text-slate-500 text-xs">100% das áreas</p>
+          <p className="mb-2 pr-8 text-xs font-medium text-slate-600 sm:text-sm">Tensiômetros</p>
+          <h2 className="mb-2 text-3xl font-bold text-slate-800 sm:mb-3 sm:text-4xl">{totalTensiometros}</h2>
+          <p className="text-[11px] text-slate-500 sm:text-xs">Distribuídos nas áreas</p>
         </div>
 
-        <div className="bg-[#fff8eb] p-6 rounded-2xl border border-[#ffe9c2] shadow-sm relative">
-          <div className="absolute top-4 right-4 bg-[#ffdfa8] p-2.5 rounded-xl">
-            <AlertTriangle size={20} className="text-amber-600" />
+        <div className="relative rounded-2xl border border-amber-100 bg-amber-50 p-4 shadow-sm sm:p-6">
+          <div className="absolute right-3 top-3 rounded-xl bg-amber-100 p-2 sm:right-4 sm:top-4 sm:p-2.5">
+            <Map size={20} className="text-amber-700" />
           </div>
-          <p className="text-slate-600 text-sm font-medium mb-2">Áreas em Alerta</p>
-          <h2 className="text-4xl font-bold text-slate-800 mb-4">0</h2>
-          <p className="text-slate-500 text-xs">Requerem atenção</p>
+          <p className="mb-2 pr-8 text-xs font-medium text-slate-600 sm:text-sm">Setores</p>
+          <h2 className="mb-2 text-3xl font-bold text-slate-800 sm:mb-3 sm:text-4xl">{totalSetores}</h2>
+          <p className="text-[11px] text-slate-500 sm:text-xs">Grupos de monitoramento</p>
         </div>
-      </div>
+      </section>
 
-      {/* Suas Áreas */}
-      <div>
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-6 gap-4">
+      <section id="areas" className="scroll-mt-28">
+        <div className="mb-5 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-xl font-bold text-slate-800">Suas Áreas</h2>
-            <p className="text-sm text-slate-500 mt-1">Gerencie e monitore todas as áreas cadastradas</p>
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">Suas áreas</h2>
+            <p className="mt-1 text-sm text-slate-500">Gerencie e monitore as áreas vinculadas à sua conta.</p>
           </div>
           <button 
             onClick={() => navigate('/agronomo/areas/nova')}
-            className="flex items-center justify-center space-x-2 bg-[#356b46] hover:bg-[#2a5538] text-white px-5 py-2.5 rounded-xl font-bold transition-colors shadow-sm"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#356b46] px-5 py-3 font-bold text-white shadow-sm transition-colors hover:bg-[#2a5538] sm:w-auto"
           >
             <Plus size={18} />
             <span>Criar nova área</span>
           </button>
         </div>
 
-        <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 sm:gap-6">
           {areas.length === 0 ? (
-            <li className="col-span-full py-12 text-center bg-white border border-slate-200 rounded-2xl">
-              <Map className="mx-auto h-12 w-12 text-slate-300 mb-3" />
-              <p className="text-slate-500 font-medium">Nenhuma área cadastrada ainda.</p>
+            <li className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center sm:py-14">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
+                <Map size={26} />
+              </div>
+              <p className="font-semibold text-slate-800">Você ainda não cadastrou uma área</p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">Crie a primeira área para começar a organizar produtores, setores e tensiômetros.</p>
+              <button
+                onClick={() => navigate('/agronomo/areas/nova')}
+                className="mt-5 inline-flex items-center justify-center gap-2 rounded-xl bg-[#356b46] px-5 py-3 font-bold text-white transition-colors hover:bg-[#2a5538]"
+              >
+                <Plus size={18} />
+                Criar primeira área
+              </button>
             </li>
           ) : (
             areas.map(area => {
-              const prod = produtores.find(p => p.id === area.produtor_id);
               const ac = getAreaColor(area.id);
               const glowShadow = `inset 0 0 20px ${ac.fill}44, 0 0 25px ${ac.fill}33, 0 0 0 2px ${ac.stroke}22`;
               return (
@@ -145,7 +145,9 @@ export default function AgronomoDashboard() {
                     <div className="flex items-start justify-between mb-3 relative">
                       <div className="flex-1 min-w-0 mr-3">
                         <h3 className="text-lg font-bold text-slate-800 truncate">{area.nome}</h3>
-                        <p className="text-sm text-slate-500 truncate mt-0.5">{prod?.nome || 'Produtor não vinculado'}</p>
+                        <p className="text-sm text-slate-500 truncate mt-0.5">
+                          {produtores.find((produtor) => produtor.id === area.produtor_id)?.nome || 'Produtor vinculado'}
+                        </p>
                       </div>
                       <div className={"flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold border shrink-0 " + (area.tensiometros.length > 0 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-400 border-slate-200')}>
                         <CheckCircle2 size={12} />
@@ -182,56 +184,79 @@ export default function AgronomoDashboard() {
             })
           )}
         </ul>
-      </div>
+      </section>
 
-      {/* Modal Add Agronomo */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between p-6 border-b border-slate-100">
-              <h2 className="text-xl font-bold text-slate-800">Novo Agrônomo</h2>
-              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-600 bg-slate-50 p-2 rounded-full">
-                <X size={20} />
+      {showCreateAgronomist && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-agronomist-title"
+            className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+              <div>
+                <h2 id="create-agronomist-title" className="text-lg font-bold text-slate-900">Cadastrar agrônomo</h2>
+                <p className="mt-1 text-sm text-slate-500">Informe os dados para criar o acesso.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateAgronomist(false)}
+                aria-label="Fechar"
+                className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100"
+              >
+                <X size={19} />
               </button>
             </div>
-            <form onSubmit={handleAddAgronomo} className="p-6 space-y-4">
-              {addError && (
-                <div className="p-3 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100">
-                  {addError}
+            <form onSubmit={handleCreateAgronomist} className="space-y-4 p-5 sm:p-6">
+              {createError && (
+                <div role="alert" className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+                  {createError}
                 </div>
               )}
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Nome Completo</label>
-                <input 
-                  type="text" required
-                  value={novoAgronomo.nome} onChange={e => setNovoAgronomo({...novoAgronomo, nome: e.target.value})}
-                  className="w-full p-3.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#356b46] outline-none"
-                  placeholder="Nome do agrônomo"
+              <label className="block text-sm font-semibold text-slate-700">
+                Nome completo
+                <input
+                  required
+                  maxLength={120}
+                  value={newAgronomist.nome}
+                  onChange={(event) => setNewAgronomist({ ...newAgronomist, nome: event.target.value })}
+                  autoComplete="name"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">E-mail</label>
-                <input 
-                  type="email" required
-                  value={novoAgronomo.email} onChange={e => setNovoAgronomo({...novoAgronomo, email: e.target.value})}
-                  className="w-full p-3.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#356b46] outline-none"
-                  placeholder="email@exemplo.com"
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                E-mail
+                <input
+                  required
+                  type="email"
+                  value={newAgronomist.email}
+                  onChange={(event) => setNewAgronomist({ ...newAgronomist, email: event.target.value })}
+                  autoComplete="email"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1.5">Senha</label>
-                <input 
-                  type="password" required
-                  value={novoAgronomo.senha} onChange={e => setNovoAgronomo({...novoAgronomo, senha: e.target.value})}
-                  className="w-full p-3.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-[#356b46] outline-none"
-                  placeholder="••••••••"
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                Senha inicial
+                <input
+                  required
+                  type="password"
+                  minLength={6}
+                  value={newAgronomist.password}
+                  onChange={(event) => setNewAgronomist({ ...newAgronomist, password: event.target.value })}
+                  autoComplete="new-password"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
                 />
-              </div>
-              <button type="submit" className="w-full bg-[#356b46] hover:bg-[#2a5538] text-white font-bold py-4 rounded-xl mt-4 transition-colors shadow-sm">
-                Salvar Agrônomo
+              </label>
+              <button
+                type="submit"
+                disabled={creating}
+                className="w-full rounded-xl bg-[#356b46] px-4 py-3 font-bold text-white transition-colors hover:bg-[#2a5538] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {creating ? 'Criando conta...' : 'Criar conta de agrônomo'}
               </button>
             </form>
-          </div>
+          </section>
         </div>
       )}
     </div>

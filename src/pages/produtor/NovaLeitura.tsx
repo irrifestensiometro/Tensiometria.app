@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { calcularIrrigacao, ErroCalculoIrrigacao, ResultadoIrrigacao } from '../../lib/irrigationMath';
-import { ArrowLeft, Droplet, Check, MapPin, Gauge, Droplets, Info } from 'lucide-react';
+import { ArrowLeft, Droplet, Check, MapPin, Droplets, Info } from 'lucide-react';
 import { LeituraValor } from '../../types';
 
 export default function NovaLeitura() {
@@ -65,23 +65,37 @@ export default function NovaLeitura() {
   };
 
   if (resultado) {
+    const temSetorParaIrrigar = resultado.setores.some((setor) => setor.necessitaIrrigacao);
     return (
-      <div className={`flex-1 flex flex-col items-center justify-center p-8 text-center rounded-3xl shadow-sm border ${resultado.necessitaIrrigacao ? 'bg-[#f0f9ff] border-[#e0f2fe]' : 'bg-[#f0fdf4] border-[#dcfce7]'}`}>
-        <div className={`p-6 rounded-full mb-6 ${resultado.necessitaIrrigacao ? 'bg-blue-600 text-white shadow-xl shadow-blue-200' : 'bg-green-600 text-white shadow-xl shadow-green-200'}`}>
-          {resultado.necessitaIrrigacao ? <Droplet size={48} /> : <Check size={48} />}
+      <div className={`flex-1 flex flex-col items-center justify-center p-8 text-center rounded-3xl shadow-sm border ${temSetorParaIrrigar ? 'bg-[#f0f9ff] border-[#e0f2fe]' : 'bg-[#f0fdf4] border-[#dcfce7]'}`}>
+        <div className={`p-6 rounded-full mb-6 ${temSetorParaIrrigar ? 'bg-blue-600 text-white shadow-xl shadow-blue-200' : 'bg-green-600 text-white shadow-xl shadow-green-200'}`}>
+          {temSetorParaIrrigar ? <Droplet size={48} /> : <Check size={48} />}
         </div>
         
-        <h2 className={`text-4xl font-black mb-2 ${resultado.necessitaIrrigacao ? 'text-blue-900' : 'text-green-900'}`}>
-          {resultado.mensagem}
+        <h2 className={`text-3xl font-black mb-2 ${temSetorParaIrrigar ? 'text-blue-900' : 'text-green-900'}`}>
+          Recomendações por setor
         </h2>
-        <p className={`text-lg mb-10 ${resultado.necessitaIrrigacao ? 'text-blue-700' : 'text-green-700'}`}>
+        <p className={`text-lg mb-8 ${temSetorParaIrrigar ? 'text-blue-700' : 'text-green-700'}`}>
           Leitura registrada com sucesso.
         </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full max-w-2xl mb-10 text-left">
-          <div className="bg-white/70 rounded-xl p-4"><p className="text-xs text-slate-500">Tensão decisão</p><p className="font-black">{resultado.tensaoDecisaoKpa?.toFixed(1) ?? '--'} kPa</p></div>
-          <div className="bg-white/70 rounded-xl p-4"><p className="text-xs text-slate-500">Umidade média</p><p className="font-black">{resultado.umidadeMedia !== null ? `${(resultado.umidadeMedia * 100).toFixed(1)}%` : '--'}</p></div>
-          <div className="bg-white/70 rounded-xl p-4"><p className="text-xs text-slate-500">Lâmina líquida</p><p className="font-black">{resultado.laminaLiquidaMm.toFixed(1)} mm</p></div>
-          <div className="bg-white/70 rounded-xl p-4"><p className="text-xs text-slate-500">Lâmina bruta</p><p className="font-black">{resultado.laminaBrutaMm.toFixed(1)} mm</p></div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl mb-10 text-left">
+          {resultado.setores.map((setor) => (
+            <div key={setor.setor} className="bg-white/80 rounded-xl border border-white p-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="font-bold text-slate-800">{setor.setor}</h3>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${setor.necessitaIrrigacao ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                  {setor.necessitaIrrigacao ? 'Irrigar' : 'Não irrigar'}
+                </span>
+              </div>
+              <p className="text-sm text-slate-600 mb-4">{setor.mensagem}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className="text-xs text-slate-500">Tensão decisão</p><p className="font-black">{setor.tensaoDecisaoKpa?.toFixed(1) ?? '--'} kPa</p></div>
+                <div><p className="text-xs text-slate-500">Umidade média</p><p className="font-black">{setor.umidadeMedia !== null ? `${(setor.umidadeMedia * 100).toFixed(1)}%` : '--'}</p></div>
+                <div><p className="text-xs text-slate-500">Lâmina líquida</p><p className="font-black">{setor.laminaLiquidaMm.toFixed(1)} mm</p></div>
+                <div><p className="text-xs text-slate-500">Lâmina bruta</p><p className="font-black">{setor.laminaBrutaMm.toFixed(1)} mm</p></div>
+              </div>
+            </div>
+          ))}
         </div>
 
         <button 
@@ -112,7 +126,11 @@ export default function NovaLeitura() {
           {leituraHoje && (
             <div className="bg-[#e0f2fe] text-blue-700 px-4 py-2 rounded-full font-bold flex items-center space-x-2 text-sm border border-[#bae6fd]">
               <Droplets size={16} />
-              <span>{resultadoHoje?.necessitaIrrigacao ? 'Irrigação necessária' : 'Leitura realizada'}</span>
+              <span>
+                {resultadoHoje
+                  ? `${resultadoHoje.setores.filter(setor => setor.necessitaIrrigacao).length} setor(es) para irrigar`
+                  : 'Leitura realizada'}
+              </span>
             </div>
           )}
         </div>
@@ -120,44 +138,26 @@ export default function NovaLeitura() {
 
       {leituraHoje && (
         <div className="bg-[#f0f9ff] border border-[#e0f2fe] rounded-2xl p-6">
-          <h3 className="font-bold text-slate-800 flex items-center mb-6">
+          <h3 className="font-bold text-slate-800 flex items-center mb-4">
             Status Atual <Info size={16} className="ml-2 text-slate-400" />
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-white/60 p-4 rounded-xl flex items-center space-x-4">
-              <Gauge size={24} className="text-slate-400" />
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase">Última leitura</p>
-                <p className="font-black text-slate-800 text-lg">
-                  {resultadoHoje?.tensaoDecisaoKpa?.toFixed(1) ?? '--'} <span className="text-sm font-normal text-slate-500">kPa</span>
+          <div className="space-y-2">
+            {resultadoHoje?.setores.map((setor) => (
+              <div key={setor.setor} className="bg-white/70 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <p className="font-bold text-slate-800">{setor.setor}</p>
+                  <p className="text-xs text-slate-500">
+                    Tensão {setor.tensaoDecisaoKpa?.toFixed(1) ?? '--'} kPa · Umidade {setor.umidadeMedia !== null ? `${(setor.umidadeMedia * 100).toFixed(1)}%` : '--'}
+                  </p>
+                </div>
+                <p className={`font-bold ${setor.necessitaIrrigacao ? 'text-blue-700' : 'text-green-700'}`}>
+                  {setor.necessitaIrrigacao ? `${setor.mensagem} · ${setor.laminaBrutaMm.toFixed(1)} mm` : 'Não irrigar'}
                 </p>
               </div>
-            </div>
-            <div className="bg-white/60 p-4 rounded-xl flex items-center space-x-4">
-              <Droplets size={24} className="text-slate-400" />
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase">Umidade estimada</p>
-                <p className="font-black text-slate-800 text-lg">
-                  {resultadoHoje?.umidadeMedia !== null && resultadoHoje?.umidadeMedia !== undefined ? (resultadoHoje.umidadeMedia * 100).toFixed(1) : '--'} <span className="text-sm font-normal text-slate-500">%</span>
-                </p>
-              </div>
-            </div>
-            <div className="bg-white/60 p-4 rounded-xl flex items-center space-x-4">
-              <Droplet size={24} className="text-blue-500" />
-              <div>
-                <p className="text-xs font-bold text-slate-500 uppercase">Irrigação</p>
-                <p className={`font-black text-lg ${resultadoHoje?.necessitaIrrigacao ? 'text-blue-600' : 'text-green-600'}`}>{resultadoHoje?.necessitaIrrigacao ? resultadoHoje.mensagem : 'Não'}</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center space-x-3 text-blue-700">
-            <div className="bg-blue-100 p-2 rounded-full">
-              <Droplets size={16} className="text-blue-600" />
-            </div>
-            <div>
-              <p className="font-bold text-sm">Recomendação calculada</p>
-              <p className="text-xs opacity-80">{resultadoHoje?.mensagem || 'Revise os parâmetros técnicos da área.'}</p>
-            </div>
+            ))}
+            {!resultadoHoje && (
+              <p className="text-sm text-amber-800">Revise os parâmetros técnicos da área para obter recomendações por setor.</p>
+            )}
           </div>
         </div>
       )}

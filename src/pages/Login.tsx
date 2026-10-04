@@ -2,17 +2,18 @@ import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppContext } from '../context/AppContext';
 import { signInWithGooglePopup, registerWithEmail, updateProfile } from '../lib/firebase';
-import { salvarUsuario } from '../lib/usuarioService';
+import { UserRoleAuthorizationError, validarAcessoPorPapel } from '../lib/authService';
 import { Droplet, ArrowLeft, Sprout, Activity, Tractor, User, Tractor as TractorIcon } from 'lucide-react';
 
 export default function Login() {
   const { type } = useParams<{ type: 'produtor' | 'agronomo' }>();
   const navigate = useNavigate();
-  const { login, setRole, addProdutor, addAgronomo } = useAppContext();
+  const { login, refreshCurrentUser, loadError } = useAppContext();
   
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [error, setError] = useState('');
+  const [pendingAuthorization, setPendingAuthorization] = useState('');
   const [loading, setLoading] = useState(false);
   const [showCadastro, setShowCadastro] = useState(false);
 
@@ -23,10 +24,52 @@ export default function Login() {
 
   const isProdutor = type === 'produtor';
   const roleName = isProdutor ? 'Produtor Rural' : 'Agrônomo';
+  const requestedRole = isProdutor ? 'produtor' : 'agronomo';
+
+  const showAuthError = (err: unknown) => {
+    if (err instanceof UserRoleAuthorizationError) {
+      setPendingAuthorization(
+        `A conta autenticada não possui um perfil ${roleName} autorizado. Envie este UID ao administrador para verificar o cadastro: ${err.uid}.`,
+      );
+      return;
+    }
+    const authError = err && typeof err === 'object'
+      ? err as { code?: string; message?: string }
+      : {};
+    if (authError.code === 'auth/popup-closed-by-user') return;
+    if (authError.code === 'auth/account-exists-with-different-credential') {
+      setError('Já existe uma conta com este e-mail usando outro método de acesso. Entre com o método original.');
+      return;
+    }
+    if (authError.code === 'auth/unauthorized-domain') {
+      setError(
+        `O domínio "${window.location.hostname}" não está autorizado para login Google. No Firebase Console, acesse Authentication > Configurações > Domínios autorizados e adicione esse domínio.`,
+      );
+      return;
+    }
+    setError(authError.message || 'Não foi possível validar o acesso. Tente novamente.');
+  };
+
+  const handleGoogleAccess = async () => {
+    setLoading(true);
+    setError('');
+    setPendingAuthorization('');
+    try {
+      const result = await signInWithGooglePopup();
+      await validarAcessoPorPapel(result.user, requestedRole);
+      await refreshCurrentUser();
+      navigate(`/${requestedRole}/dashboard`);
+    } catch (err) {
+      showAuthError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setPendingAuthorization('');
     setLoading(true);
     
     try {
@@ -34,10 +77,10 @@ export default function Login() {
       if (success) {
         navigate(`/${type}/dashboard`);
       } else {
-        setError('Credenciais inválidas. Tente novamente.');
+        setError('Esta conta não está autorizada para acessar este perfil.');
       }
-    } catch {
-      setError('Erro ao fazer login. Verifique suas credenciais.');
+    } catch (err) {
+      showAuthError(err);
     } finally {
       setLoading(false);
     }
@@ -46,6 +89,12 @@ export default function Login() {
   const handleCadastro = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setPendingAuthorization('');
+
+    if (!isProdutor) {
+      setError('O cadastro de agrônomo não está disponível por esta tela.');
+      return;
+    }
 
     if (!cadNome.trim() || !cadEmail.trim() || !cadSenha.trim()) {
       setError('Preencha todos os campos.');
@@ -60,20 +109,10 @@ export default function Login() {
     try {
       const credencial = await registerWithEmail(cadEmail.trim(), cadSenha);
       await updateProfile(credencial.user, { displayName: cadNome.trim() });
-      await salvarUsuario(credencial.user.uid, {
-        nome: cadNome.trim(),
-        email: cadEmail.trim(),
-        tipo: type as 'agronomo' | 'produtor',
-      });
-      const novoUsuario = { id: credencial.user.uid, nome: cadNome.trim(), email: cadEmail.trim() };
-      if (type === 'produtor') {
-        addProdutor(novoUsuario);
-      } else {
-        addAgronomo(novoUsuario);
-      }
+      await validarAcessoPorPapel(credencial.user, requestedRole);
+      await refreshCurrentUser();
+      navigate(`/${requestedRole}/dashboard`);
       setShowCadastro(false);
-      setEmail(cadEmail.trim());
-      setSenha(cadSenha);
       setCadNome('');
       setCadEmail('');
       setCadSenha('');
@@ -84,7 +123,7 @@ export default function Login() {
       } else if (err.code === 'auth/weak-password') {
         setError('A senha deve ter pelo menos 6 caracteres.');
       } else {
-        setError('Erro ao criar conta. Tente novamente.');
+        showAuthError(err);
       }
     } finally {
       setLoading(false);
@@ -163,16 +202,27 @@ export default function Login() {
         <div className="flex-1" />
 
         <div className="w-full max-w-sm">
-          {isProdutor && showCadastro ? (
+          {showCadastro && isProdutor ? (
             <>
               <div className="flex flex-col items-center mb-8">
                 <div className="p-4 rounded-2xl mb-4 bg-[#b57d59] text-white shadow-lg">
                   <TractorIcon size={32} />
                 </div>
-                <h2 className="text-2xl font-bold text-slate-800 text-center">Criar Conta</h2>
-                <p className="text-slate-500 text-sm mt-2">Cadastre-se como produtor rural</p>
+                <h2 className="text-2xl font-bold text-slate-800 text-center">Criar conta de {roleName}</h2>
+                <p className="text-slate-500 text-sm mt-2">Cadastre-se para acessar o sistema como {roleName.toLowerCase()}</p>
+                <p className="text-amber-800 text-xs text-center mt-3">
+                  Seu perfil de produtor será criado automaticamente.
+                </p>
               </div>
 
+              {pendingAuthorization && (
+                <div className="mb-6 p-4 bg-amber-50 text-amber-900 text-sm rounded-xl border border-amber-200">
+                  {pendingAuthorization}
+                  <p className="mt-2">
+                    O produtor pode criar o próprio acesso pelo cadastro.
+                  </p>
+                </div>
+              )}
               {error && (
                 <div className="mb-6 p-4 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100 flex items-center space-x-3">
                   <div className="bg-red-100 p-1 rounded-full shrink-0">
@@ -180,6 +230,33 @@ export default function Login() {
                   </div>
                   <p>{error}</p>
                 </div>
+              )}
+              {loadError && (
+                <div className="mb-6 p-4 bg-amber-50 text-amber-800 text-sm rounded-xl border border-amber-200">
+                  {loadError}
+                </div>
+              )}
+
+              {isProdutor && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleGoogleAccess}
+                    disabled={loading}
+                    className="mb-5 w-full py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-semibold shadow-sm hover:shadow-md hover:border-slate-300 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center space-x-3"
+                  >
+                    <span aria-hidden="true" className="text-lg font-bold text-[#4285F4]">G</span>
+                    <span>{loading ? 'Verificando acesso...' : 'Criar conta com Google'}</span>
+                  </button>
+                  <div className="relative mb-6">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-200"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-[#FAFAFA] px-4 text-slate-400 font-medium">ou crie com e-mail</span>
+                    </div>
+                  </div>
+                </>
               )}
 
               <form onSubmit={handleCadastro} className="space-y-4">
@@ -232,7 +309,7 @@ export default function Login() {
                   disabled={loading}
                   className="w-full py-4 rounded-xl text-white font-bold text-lg shadow-md hover:shadow-lg transition-all active:scale-[0.98] bg-[#b57d59] hover:bg-[#99694b] disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  {loading ? 'Criando conta...' : 'Criar Conta'}
+                  {loading ? 'Criando conta...' : `Criar conta de ${roleName}`}
                 </button>
               </form>
 
@@ -258,29 +335,11 @@ export default function Login() {
               {isProdutor && (
                 <>
                   <div className="mb-6 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-                    <h3 className="text-sm font-bold text-slate-700 mb-3">Acesso Rápido</h3>
+                    <h3 className="text-sm font-bold text-slate-700 mb-3">Acesso com Google</h3>
                     <button
                       type="button"
-                      onClick={async () => {
-                        setLoading(true);
-                        setError('');
-                        try {
-                          const result = await signInWithGooglePopup();
-                          setRole('produtor');
-                          await salvarUsuario(result.user.uid, {
-                            nome: result.user.displayName || result.user.email || '',
-                            email: result.user.email || '',
-                            tipo: 'produtor',
-                          }).catch(() => {});
-                          navigate('/produtor/dashboard');
-                        } catch (err: any) {
-                          if (err.code !== 'auth/popup-closed-by-user') {
-                            setError('Erro ao entrar com Google. Tente novamente.');
-                          }
-                        } finally {
-                          setLoading(false);
-                        }
-                      }}
+                      onClick={handleGoogleAccess}
+                      disabled={loading}
                       className="w-full py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-700 font-semibold shadow-sm hover:shadow-md hover:border-slate-300 transition-all active:scale-[0.98] flex items-center justify-center space-x-3"
                     >
                       <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -289,7 +348,7 @@ export default function Login() {
                         <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                         <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                       </svg>
-                      <span>Entrar com Google</span>
+                      <span>{loading ? 'Verificando acesso...' : 'Continuar com Google'}</span>
                     </button>
                   </div>
 
@@ -304,12 +363,27 @@ export default function Login() {
                 </>
               )}
 
+              {pendingAuthorization && (
+                <div className="mb-6 p-4 bg-amber-50 text-amber-900 text-sm rounded-xl border border-amber-200">
+                  {pendingAuthorization}
+                  <p className="mt-2">
+                    {isProdutor
+                      ? 'Produtores podem criar o próprio perfil pelo formulário ou com Google.'
+                      : 'Entre em contato com o administrador do sistema para verificar seu acesso.'}
+                  </p>
+                </div>
+              )}
               {error && (
                 <div className="mb-6 p-4 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100 flex items-center space-x-3">
                   <div className="bg-red-100 p-1 rounded-full shrink-0">
                     <Activity size={16} />
                   </div>
                   <p>{error}</p>
+                </div>
+              )}
+              {loadError && (
+                <div className="mb-6 p-4 bg-amber-50 text-amber-800 text-sm rounded-xl border border-amber-200">
+                  {loadError}
                 </div>
               )}
 
@@ -347,15 +421,26 @@ export default function Login() {
                 </button>
               </form>
 
-              {isProdutor && (
-                <div className="mt-8 pt-6 border-t border-slate-200 text-center">
+              {isProdutor ? (
+                <div className="mt-8 border-t border-slate-200 pt-6 text-center">
                   <p className="text-sm text-slate-500">
                     Ainda não tem uma conta?{' '}
-                    <button onClick={() => { setShowCadastro(true); setError(''); }} className="text-[#b57d59] font-bold hover:underline">
-                      Criar conta de produtor
+                    <button
+                      onClick={() => {
+                        setShowCadastro(true);
+                        setError('');
+                        setPendingAuthorization('');
+                      }}
+                      className="font-bold text-[#b57d59] hover:underline"
+                    >
+                      Criar conta de produtor rural
                     </button>
                   </p>
                 </div>
+              ) : (
+                <p className="mt-8 border-t border-slate-200 pt-6 text-center text-sm text-slate-500">
+                  Novas contas de agrônomo são cadastradas por um agrônomo autenticado.
+                </p>
               )}
             </>
           )}

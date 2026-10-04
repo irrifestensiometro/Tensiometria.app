@@ -255,7 +255,6 @@ export default function Contato() {
                     >
                       <option value="">Selecione um assunto</option>
                       <option value="Quero ser produtor">Quero ser produtor</option>
-                      <option value="Quero ser consultor/agrônomo">Quero ser consultor/agrônomo</option>
                       <option value="Suporte técnico">Suporte técnico</option>
                       <option value="Parcerias">Parcerias</option>
                       <option value="Outro">Outro</option>

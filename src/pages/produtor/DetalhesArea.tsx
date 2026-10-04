@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
-import { MapContainer, TileLayer, Polygon, Popup, Marker } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, Popup, Marker, LayersControl } from 'react-leaflet';
 import { initLeafletIcons } from '../../lib/leaflet-setup';
+import { HybridSatelliteTiles } from '../../components/map/HybridSatelliteTiles';
 import { getAreaColor } from '../../lib/areaColors';
 import { Produtor } from '../../types';
 import { ArrowLeft, Droplet, Sprout, Calendar, Clock, Activity, AlertTriangle, CheckCircle2, CloudRain, MapPin } from 'lucide-react';
@@ -64,12 +65,16 @@ export default function DetalhesArea() {
   if (ultimaLeitura && !resultadoAtual) {
     statusGeral = { text: 'Parâmetros inválidos', color: 'text-red-700', bg: 'bg-red-50', borderColor: 'border-red-200', icon: <AlertTriangle size={24} className="text-red-600" /> };
     recomendacao = 'O agrônomo precisa revisar os parâmetros técnicos desta área.';
-  } else if (resultadoAtual?.necessitaIrrigacao) {
+  } else if (resultadoAtual?.setores.some(setor => setor.necessitaIrrigacao)) {
     statusGeral = { text: 'Irrigação necessária', color: 'text-blue-700', bg: 'bg-blue-50', borderColor: 'border-blue-200', icon: <Droplet size={24} className="text-blue-600" /> };
-    recomendacao = `${resultadoAtual.mensagem}. Lâmina bruta: ${resultadoAtual.laminaBrutaMm.toFixed(1)} mm.`;
+    recomendacao = resultadoAtual.setores.map(setor =>
+      `${setor.setor}: ${setor.necessitaIrrigacao
+        ? `${setor.mensagem}; lâmina bruta ${setor.laminaBrutaMm.toFixed(1)} mm`
+        : 'não irrigar'}`,
+    ).join('. ');
   } else if (resultadoAtual) {
     statusGeral = { text: 'Não irrigar', color: 'text-green-700', bg: 'bg-green-50', borderColor: 'border-green-200', icon: <CheckCircle2 size={24} className="text-green-600" /> };
-    recomendacao = resultadoAtual.mensagem;
+    recomendacao = resultadoAtual.setores.map(setor => `${setor.setor}: não irrigar`).join('. ');
   }
 
   const positions = area.poligono?.map(p => [p.lat, p.lng] as [number, number]);
@@ -157,10 +162,17 @@ export default function DetalhesArea() {
                 zoom={15}
                 style={{ height: '100%', width: '100%' }}
               >
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
+                <LayersControl position="topright">
+                  <LayersControl.BaseLayer checked name="Satélite (Híbrido)">
+                    <HybridSatelliteTiles />
+                  </LayersControl.BaseLayer>
+                  <LayersControl.BaseLayer name="Mapa Padrão">
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                  </LayersControl.BaseLayer>
+                </LayersControl>
                 {produtor?.localizacao_sede && (
                   <Marker position={[produtor.localizacao_sede.lat, produtor.localizacao_sede.lng]}>
                     <Popup>Sede: {produtor.nome}</Popup>
@@ -200,13 +212,13 @@ export default function DetalhesArea() {
             <div className="space-y-4">
               {leiturasArea.map((leitura, index) => {
                 const dataLeitura = parseISO(leitura.data);
-                const mediaKpa = leitura.valores.reduce((acc, curr) => acc + curr.leitura_kpa, 0) / leitura.valores.length;
-                
-                let textColor = 'text-slate-600';
+
+                let resultadosSetor: ResultadoIrrigacao['setores'] = [];
+                let erroCalculoHistorico = false;
                 try {
-                  textColor = calcularIrrigacao(area, leitura.valores).necessitaIrrigacao ? 'text-blue-600' : 'text-green-600';
+                  resultadosSetor = calcularIrrigacao(area, leitura.valores).setores;
                 } catch {
-                  textColor = 'text-red-600';
+                  erroCalculoHistorico = true;
                 }
 
                 return (
@@ -232,10 +244,20 @@ export default function DetalhesArea() {
                         );
                       })}
                     </div>
-                    
                     <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-400 uppercase">Média Geral</span>
-                      <span className={`font-black ${textColor}`}>{mediaKpa.toFixed(1)} <span className="text-[10px]">kPa</span></span>
+                      <div className="w-full space-y-1">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Recomendação por setor</span>
+                        {erroCalculoHistorico && (
+                          <p className="text-xs font-bold text-red-600">Parâmetros inválidos para calcular esta leitura.</p>
+                        )}
+                        {resultadosSetor.map(setor => (
+                          <p key={setor.setor} className={`text-xs font-bold ${setor.necessitaIrrigacao ? 'text-blue-600' : 'text-green-600'}`}>
+                            {setor.setor}: {setor.necessitaIrrigacao
+                              ? `${setor.mensagem} (${setor.laminaBrutaMm.toFixed(1)} mm brutos)`
+                              : 'Não irrigar'}
+                          </p>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 );

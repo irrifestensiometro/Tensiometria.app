@@ -1,20 +1,65 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Tensiometria.app
 
-# Run and deploy your AI Studio app
+Aplicacao web para acompanhamento de tensiometria e irrigacao.
 
-This contains everything you need to run your app locally.
+## Executar localmente
 
-View your app in AI Studio: https://ai.studio/apps/05c17d82-c4b7-430d-8c3e-5e1f1f14d954
+**Pre-requisitos:** Node.js 18 ou superior e npm.
 
-## Run Locally
+1. Instale as dependencias:
 
-**Prerequisites:**  Node.js
+   ```powershell
+   npm install
+   ```
 
+2. Crie o arquivo local de configuracao a partir do modelo:
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```powershell
+   Copy-Item .env.example .env.local
+   ```
+
+3. No arquivo `.env.local`, substitua os valores `YOUR_...` pelos dados do app Web do Firebase, encontrados em **Firebase Console > Configuracoes do projeto > Geral > Seus apps**. As variaveis `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID` e `VITE_FIREBASE_APP_ID` sao necessarias para iniciar a aplicacao.
+
+   Para usar autenticacao e dados, habilite os provedores de login usados pelo projeto em **Authentication** e configure o **Firestore** no mesmo projeto. Adicione `localhost` aos dominios autorizados em **Authentication > Configuracoes > Dominios autorizados** se for usar login Google. Use `http://localhost:3000` (nao `http://127.0.0.1:3000`); se preferir o endereco IP, adicione tambem `127.0.0.1` nessa lista.
+
+4. Inicie o servidor de desenvolvimento:
+
+   ```powershell
+   npm run dev
+   ```
+
+5. Abra [http://localhost:3000](http://localhost:3000). O servidor fica vinculado ao loopback local. Reinicie-o depois de alterar `.env.local`.
+
+## Verificacoes
+
+```powershell
+npm run lint
+npm test
+npm run build
+```
+
+## Setores e recomendacoes de irrigacao
+
+Cada setor agrupa seus proprios tensiometros e recebe um calculo independente de gatilho, lamina e tempo de irrigacao. Os parametros de solo, cultura e sistema de irrigacao sao compartilhados pela area; as leituras e as camadas monitoradas sao avaliadas separadamente dentro de cada setor. Para que a recomendacao seja calculada, cada setor precisa ter ao menos um tensiometro de decisao e seus sensores devem cobrir a profundidade radicular sem lacunas. Os resultados sao apresentados por setor para o produtor e para o agronomo.
+
+## Regras seguras do Firestore
+
+O app usa regras com permissao negada por padrao. Produtores e agronomos podem criar o proprio perfil apos autenticacao por e-mail ou Google, sem aprovacao. Um agronomo autenticado tambem pode criar outra conta de agronomo pelo painel; novos agronomos nao recebem privilegios de administrador. Para preencher a selecao de produtor, um agronomo autenticado pode consultar perfis com `tipo: "produtor"` na colecao `usuarios`. Essa permissao retorna os campos completos desses perfis, incluindo email e localizacao.
+
+**Importante:** publique `firestore.rules` atualizado no Console do Firestore para permitir cadastro automatico de produtores e agronomos e consulta dos perfis de produtores por agronomos. A regra exige que a consulta seja filtrada por `tipo == "produtor"`; sem essa publicacao, a lista retornara `permission-denied`.
+
+```powershell
+$env:FIREBASE_PROJECT_ID = "irrifes-tensiometria"
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\caminho-seguro\firebase-admin.json"
+npm run provision:admin -- agro@adm.com "Agrônomo administrador"
+```
+
+Execute esse comando uma unica vez para criar a conta inicial. O script pede a senha duas vezes sem mostrá-la na tela e exige no minimo 12 caracteres. Use uma senha nova, forte e diferente de qualquer senha compartilhada em mensagens. A credencial de servico deve ficar fora do repositorio; nao a envie ao navegador nem ao Git. O comando usa o Admin SDK localmente, sem Cloud Functions ou plano Blaze.
+
+Depois, qualquer agronomo autenticado pode criar outra conta pela dashboard, informando nome, e-mail e senha inicial. O cadastro de agronomo permanece indisponivel na tela de login e no formulario de contato. Publique as regras atualizadas para permitir a criacao do perfil por um agronomo ja autenticado; o auto-cadastro continua permitido apenas para produtores.
+
+O cadastro de produtor por formulario ou Google cria o perfil com `tipo: "produtor"` sem aprovacao. Tanto produtor quanto agronomo precisam ter perfil com o tipo correto para acessar o respectivo painel; tentar entrar no perfil errado encerra a sessao.
+
+Para cadastrar areas, use o UID da conta de produtor existente em Authentication. As regras verificam que o perfil Firestore desse UID existe e tem `tipo: "produtor"`. Leituras ainda nao sao persistidas no Firestore e permanecem bloqueadas pelas regras.
+
+Esse provisionamento nao usa Cloud Functions nem exige ativar o plano Blaze. No plano Spark, operacoes estao sujeitas as cotas gratuitas e podem ser limitadas quando a cota e atingida; nao habilite billing se quiser permanecer no gratuito.

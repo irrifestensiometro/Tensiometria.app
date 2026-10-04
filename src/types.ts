@@ -13,6 +13,12 @@ export interface Produtor {
   localizacao_sede?: { lat: number; lng: number };
 }
 
+export interface ProdutorOpcao {
+  id: string;
+  nome: string;
+  localizacao_sede?: { lat: number; lng: number };
+}
+
 export interface Tensiometro {
   id: string;
   prof_cm: number;

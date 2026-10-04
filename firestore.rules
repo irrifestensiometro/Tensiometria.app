@@ -1,0 +1,160 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function userPath(userId) {
+      return /databases/$(database)/documents/usuarios/$(userId);
+    }
+
+    function hasRole(role) {
+      return signedIn()
+        && exists(userPath(uid()))
+        && get(userPath(uid())).data.tipo == role;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function producerProfileExists(producerId) {
+      return exists(userPath(producerId))
+        && get(userPath(producerId)).data.tipo == 'produtor';
+    }
+
+    function validProfile(data) {
+      return data.keys().hasAll(['nome', 'email', 'tipo'])
+        && data.keys().hasOnly([
+          'nome',
+          'email',
+          'tipo',
+          'localizacao_sede',
+          'criado_em'
+        ])
+        && data.nome is string
+        && data.email is string
+        && data.tipo in ['agronomo', 'produtor']
+        && (
+          !('localizacao_sede' in data)
+          || data.localizacao_sede is map
+        )
+        && (
+          !('criado_em' in data)
+          || data.criado_em is timestamp
+        );
+    }
+
+    function validArea(data, areaId) {
+      return data.keys().hasAll([
+          'id',
+          'agronomo_id',
+          'produtor_id',
+          'nome',
+          'solo',
+          'planta',
+          'irrigacao',
+          'tensiometros',
+          'criado_em'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'agronomo_id',
+          'produtor_id',
+          'nome',
+          'poligono',
+          'solo',
+          'planta',
+          'irrigacao',
+          'tensiometros',
+          'criado_em'
+        ])
+        && data.id == areaId
+        && data.agronomo_id is string
+        && data.produtor_id is string
+        && data.nome is string
+        && data.solo is map
+        && data.planta is map
+        && data.irrigacao is map
+        && data.tensiometros is list
+        && data.criado_em is timestamp
+        && (
+          !('poligono' in data)
+          || data.poligono is list
+        );
+    }
+
+    match /usuarios/{userId} {
+      allow get: if signedIn() && (uid() == userId || isAdmin());
+      allow list: if hasRole('agronomo')
+        && resource.data.tipo == 'produtor';
+
+      allow create: if (
+          signedIn()
+          && uid() == userId
+          && request.resource.data.tipo == 'produtor'
+          && request.resource.data.email == request.auth.token.email
+          && validProfile(request.resource.data)
+        )
+        || (
+          isAdmin()
+          && request.resource.data.tipo == 'agronomo'
+          && validProfile(request.resource.data)
+        )
+        || (
+          hasRole('agronomo')
+          && uid() != userId
+          && request.resource.data.tipo == 'agronomo'
+          && validProfile(request.resource.data)
+        );
+
+      allow update: if signedIn()
+        && uid() == userId
+        && request.resource.data.tipo == resource.data.tipo
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.email == request.auth.token.email
+        && validProfile(request.resource.data);
+
+      allow delete: if isAdmin();
+    }
+
+    match /areas/{areaId} {
+      allow get, list: if isAdmin()
+        || (
+          signedIn()
+          && (
+            resource.data.agronomo_id == uid()
+            || resource.data.produtor_id == uid()
+          )
+        );
+
+      allow create: if hasRole('agronomo')
+        && request.resource.data.agronomo_id == uid()
+        && producerProfileExists(request.resource.data.produtor_id)
+        && validArea(request.resource.data, areaId);
+
+      allow update: if hasRole('agronomo')
+        && resource.data.agronomo_id == uid()
+        && request.resource.data.agronomo_id == resource.data.agronomo_id
+        && producerProfileExists(request.resource.data.produtor_id)
+        && validArea(request.resource.data, areaId);
+
+      allow delete: if hasRole('agronomo')
+        && resource.data.agronomo_id == uid();
+
+      match /leituras/{leituraId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,16 +1,36 @@
-import { doc, setDoc, getDocs, deleteDoc, collection, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 import { db } from "./firebase";
 import { Area } from "../types";
 
-export const salvarArea = async (area: Area) => {
+export const criarArea = async (area: Area) => {
   await setDoc(doc(db, "areas", area.id), {
     ...area,
     criado_em: serverTimestamp(),
   });
 };
 
-export const listarAreas = async () => {
-  const snap = await getDocs(collection(db, "areas"));
+export const atualizarArea = async (area: Area) => {
+  const { id, ...dados } = area;
+  await updateDoc(doc(db, "areas", id), dados);
+};
+
+export const listarAreasDoUsuario = async (
+  userId: string,
+  role: "agronomo" | "produtor",
+) => {
+  const campo = role === "agronomo" ? "agronomo_id" : "produtor_id";
+  const q = query(collection(db, "areas"), where(campo, "==", userId));
+  const snap = await getDocs(q);
   return snap.docs.map(doc => doc.data() as Area);
 };
 

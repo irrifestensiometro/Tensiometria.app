@@ -1,99 +1,119 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Agronomo, Produtor, Area, Leitura } from '../types';
+import React, { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import type { User } from 'firebase/auth';
+import { Area, Leitura, Produtor, ProdutorOpcao } from '../types';
 import { auth, onAuthChange, loginWithEmail, logoutUser } from '../lib/firebase';
-import { buscarUsuario, buscarUsuariosPorTipo } from '../lib/usuarioService';
-import { salvarArea, listarAreas, deletarArea } from '../lib/areaService';
+import { validarAcessoPorPapel } from '../lib/authService';
+import { buscarUsuario, listarProdutoresParaVinculo } from '../lib/usuarioService';
+import { criarArea, atualizarArea as persistirArea, listarAreasDoUsuario, deletarArea } from '../lib/areaService';
 
 interface AppState {
-  agronomos: Agronomo[];
-  produtores: Produtor[];
+  produtores: ProdutorOpcao[];
   areas: Area[];
   leituras: Leitura[];
-  currentUser: Agronomo | Produtor | null;
+  currentUser: Produtor | null;
   userRole: 'agronomo' | 'produtor' | null;
   loading: boolean;
+  loadError: string | null;
   login: (email: string, password: string, role: 'agronomo' | 'produtor') => Promise<boolean>;
   logout: () => Promise<void>;
-  setRole: (role: 'agronomo' | 'produtor') => void;
-  addArea: (area: Area) => void;
-  updateArea: (area: Area) => void;
-  removeArea: (areaId: string) => void;
+  refreshCurrentUser: () => Promise<void>;
+  addArea: (area: Area) => Promise<void>;
+  updateArea: (area: Area) => Promise<void>;
+  removeArea: (areaId: string) => Promise<void>;
   addLeitura: (leitura: Leitura) => void;
-  addAgronomo: (agronomo: Agronomo) => void;
-  addProdutor: (produtor: Produtor) => void;
   updateProdutor: (produtor: Produtor) => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Erro inesperado ao carregar os dados.';
+
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [agronomos, setAgronomos] = useState<Agronomo[]>([]);
-  const [produtores, setProdutores] = useState<Produtor[]>([]);
+  const [produtores, setProdutores] = useState<ProdutorOpcao[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [leituras, setLeituras] = useState<Leitura[]>([]);
-  const [currentUser, setCurrentUser] = useState<Agronomo | Produtor | null>(null);
+  const [currentUser, setCurrentUser] = useState<Produtor | null>(null);
   const [userRole, setUserRole] = useState<'agronomo' | 'produtor' | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadVersion = useRef(0);
+
+  const loadUserData = async (firebaseUser: User) => {
+    const version = ++loadVersion.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const userData = await buscarUsuario(firebaseUser.uid);
+      if (version !== loadVersion.current) return;
+      if (!userData) {
+        throw new Error('Esta conta ainda não tem perfil no sistema. Crie seu perfil de produtor ou solicite ao administrador o cadastro como agrônomo.');
+      }
+      const role = userData.tipo;
+
+      const [userAreas, producerOptions] = await Promise.all([
+        listarAreasDoUsuario(firebaseUser.uid, role),
+        role === 'agronomo'
+          ? listarProdutoresParaVinculo()
+          : Promise.resolve<ProdutorOpcao[]>([]),
+      ]);
+      if (version !== loadVersion.current) return;
+      setCurrentUser({
+        id: firebaseUser.uid,
+        nome: userData.nome,
+        email: userData.email,
+        ...(userData.localizacao_sede
+          ? { localizacao_sede: userData.localizacao_sede }
+          : {}),
+      });
+      setUserRole(role);
+      setProdutores(
+        role === 'produtor'
+          ? [{
+              id: firebaseUser.uid,
+              nome: userData.nome,
+            }]
+          : producerOptions,
+      );
+      setAreas(userAreas);
+    } catch (error) {
+      if (version !== loadVersion.current) return;
+      setCurrentUser(null);
+      setUserRole(null);
+      setProdutores([]);
+      setAreas([]);
+      setLoadError(`Não foi possível carregar os dados da conta: ${getErrorMessage(error)}`);
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthChange((firebaseUser) => {
       if (firebaseUser) {
-        setLoading(true);
-        const user: Produtor = {
-          id: firebaseUser.uid,
-          nome: firebaseUser.displayName || firebaseUser.email || '',
-          email: firebaseUser.email || '',
-        };
-        setCurrentUser(user);
-        Promise.all([
-          buscarUsuario(firebaseUser.uid),
-          buscarUsuariosPorTipo('produtor'),
-          buscarUsuariosPorTipo('agronomo'),
-          listarAreas(),
-        ]).then(([userData, produtoresData, agronomosData, areasData]) => {
-          if (userData) {
-            setUserRole(userData.tipo);
-            if (userData.localizacao_sede) {
-              setCurrentUser(prev => prev ? { ...prev, localizacao_sede: userData.localizacao_sede! } : prev);
-            }
-          }
-          setProdutores(produtoresData.map(p => ({
-            id: p.id,
-            nome: p.nome,
-            email: p.email,
-            localizacao_sede: p.localizacao_sede,
-          })));
-          setAgronomos(agronomosData.map(a => ({
-            id: a.id,
-            nome: a.nome,
-            email: a.email,
-          })));
-          setAreas(areasData);
-        }).catch(() => {}).finally(() => setLoading(false));
+        void loadUserData(firebaseUser);
       } else {
+        loadVersion.current += 1;
         setCurrentUser(null);
         setUserRole(null);
+        setProdutores([]);
+        setAreas([]);
+        setLoadError(null);
         setLoading(false);
       }
     });
     return unsubscribe;
   }, []);
 
-  const login = async (email: string, password: string, role: 'agronomo' | 'produtor') => {
-    try {
-      await loginWithEmail(email, password);
-      const firebaseUser = auth.currentUser;
-      if (firebaseUser) {
-        setCurrentUser({
-          id: firebaseUser.uid,
-          nome: firebaseUser.displayName || firebaseUser.email || '',
-          email: firebaseUser.email || '',
-        });
-      }
-      setUserRole(role);
-      return true;
-    } catch {
-      return false;
+  const login = async (email: string, password: string, requestedRole: 'agronomo' | 'produtor') => {
+    const credential = await loginWithEmail(email, password);
+    await validarAcessoPorPapel(credential.user, requestedRole);
+    return true;
+  };
+
+  const refreshCurrentUser = async () => {
+    if (auth.currentUser) {
+      await loadUserData(auth.currentUser);
     }
   };
 
@@ -101,46 +121,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     await logoutUser();
   };
 
-  const setRole = (role: 'agronomo' | 'produtor') => {
-    setUserRole(role);
+  const addArea = async (area: Area) => {
+    await criarArea(area);
+    setAreas((current) => [...current, area]);
   };
 
-  const addArea = (area: Area) => {
-    setAreas([...areas, area]);
-    salvarArea(area).catch(() => {});
+  const updateArea = async (areaAtualizada: Area) => {
+    await persistirArea(areaAtualizada);
+    setAreas((current) => current.map((area) =>
+      area.id === areaAtualizada.id ? areaAtualizada : area,
+    ));
   };
 
-  const updateArea = (areaAtualizada: Area) => {
-    setAreas(areas.map(a => a.id === areaAtualizada.id ? areaAtualizada : a));
-    salvarArea(areaAtualizada).catch(() => {});
-  };
-
-  const removeArea = (areaId: string) => {
-    setAreas(areas.filter(a => a.id !== areaId));
-    deletarArea(areaId).catch(() => {});
+  const removeArea = async (areaId: string) => {
+    await deletarArea(areaId);
+    setAreas((current) => current.filter((area) => area.id !== areaId));
   };
 
   const addLeitura = (leitura: Leitura) => {
-    setLeituras([...leituras, leitura]);
-  };
-
-  const addAgronomo = (agronomo: Agronomo) => {
-    setAgronomos([...agronomos, agronomo]);
-  };
-
-  const addProdutor = (produtor: Produtor) => {
-    setProdutores([...produtores, produtor]);
+    setLeituras((current) => [...current, leitura]);
   };
 
   const updateProdutor = (produtorAtualizado: Produtor) => {
-    setProdutores(produtores.map(p => p.id === produtorAtualizado.id ? produtorAtualizado : p));
+    setProdutores((current) => current.map((produtor) =>
+      produtor.id === produtorAtualizado.id ? produtorAtualizado : produtor,
+    ));
     if (currentUser?.id === produtorAtualizado.id) {
       setCurrentUser(produtorAtualizado);
     }
   };
 
   return (
-    <AppContext.Provider value={{ agronomos, produtores, areas, leituras, currentUser, userRole, loading, login, logout, setRole, addArea, updateArea, removeArea, addLeitura, addAgronomo, addProdutor, updateProdutor }}>
+    <AppContext.Provider value={{
+      produtores,
+      areas,
+      leituras,
+      currentUser,
+      userRole,
+      loading,
+      loadError,
+      login,
+      logout,
+      refreshCurrentUser,
+      addArea,
+      updateArea,
+      removeArea,
+      addLeitura,
+      updateProdutor,
+    }}>
       {children}
     </AppContext.Provider>
   );
