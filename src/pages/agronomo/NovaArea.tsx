@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
-import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles, Cloud, CloudOff } from 'lucide-react';
+import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles, Cloud, CloudOff, Undo2 } from 'lucide-react';
 import { Area, AreaDraft } from '../../types';
 import { validarParametrosIrrigacao } from '../../lib/irrigationMath';
 import { formatarNumeroLocalizado, parseNumeroLocalizado } from '../../lib/numberFormat';
@@ -576,14 +576,27 @@ export default function NovaArea() {
 
           {step === 2 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-2">
                 <h2 className="text-xl font-bold text-slate-800">Localização da Área (opcional)</h2>
-                <button
-                  onClick={() => setPolygonPoints([])}
-                  className="text-sm font-bold text-red-600 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg"
-                >
-                  Limpar Desenho
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPolygonPoints(points => points.slice(0, -1))}
+                    disabled={polygonPoints.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Undo2 size={16} />
+                    Desfazer ponto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPolygonPoints([])}
+                    disabled={polygonPoints.length === 0}
+                    className="text-sm font-bold text-red-600 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Limpar Desenho
+                  </button>
+                </div>
               </div>
               <p className="text-slate-500 text-sm">
                 {localizacaoProdutor
