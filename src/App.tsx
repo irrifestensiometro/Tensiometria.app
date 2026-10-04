@@ -21,6 +21,8 @@ import AgronomoLayout from './layouts/AgronomoLayout';
 import AgronomoDashboard from './pages/agronomo/Dashboard';
 import AgronomoDetalhesArea from './pages/agronomo/DetalhesArea';
 import NovaArea from './pages/agronomo/NovaArea';
+import { FirstLoginPrompts } from './components/FirstLoginPrompts';
+import Profile from './pages/Profile';
 
 function RootRedirect() {
   const { userRole, loading } = useAppContext();
@@ -35,6 +37,7 @@ export default function App() {
   return (
     <AppProvider>
       <Router>
+        <FirstLoginPrompts />
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login/:type" element={<Login />} />
@@ -44,6 +47,7 @@ export default function App() {
           {/* Rotas Produtor */}
           <Route path="/produtor" element={<ProdutorLayout />}>
             <Route path="dashboard" element={<ProdutorDashboard />} />
+            <Route path="perfil" element={<Profile role="produtor" />} />
             <Route path="areas/:areaId" element={<DetalhesArea />} />
             <Route path="leituras/nova" element={<NovaLeitura />} />
             <Route index element={<Navigate to="dashboard" replace />} />
@@ -52,6 +56,7 @@ export default function App() {
           {/* Rotas Agrônomo */}
           <Route path="/agronomo" element={<AgronomoLayout />}>
             <Route path="dashboard" element={<AgronomoDashboard />} />
+            <Route path="perfil" element={<Profile role="agronomo" />} />
             <Route path="areas/nova" element={<NovaArea />} />
             <Route path="areas/:areaId/editar" element={<NovaArea />} />
             <Route path="areas/:areaId" element={<AgronomoDetalhesArea />} />

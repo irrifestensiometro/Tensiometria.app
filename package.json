@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test src/lib/irrigationMath.test.ts",
     "provision:admin": "tsx scripts/create-admin.ts",
-    "provision:user": "tsx scripts/provision-user.ts"
+    "provision:user": "tsx scripts/provision-user.ts",
+    "delete:agronomist": "tsx scripts/delete-agronomist.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

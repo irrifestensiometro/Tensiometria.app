@@ -1,15 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
-import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles } from 'lucide-react';
-import { Area } from '../../types';
+import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles, Cloud, CloudOff } from 'lucide-react';
+import { Area, AreaDraft } from '../../types';
 import { validarParametrosIrrigacao } from '../../lib/irrigationMath';
+import { formatarNumeroLocalizado, parseNumeroLocalizado } from '../../lib/numberFormat';
 import { MapContainer, Polygon, Marker, Popup } from 'react-leaflet';
 import { initLeafletIcons } from '../../lib/leaflet-setup';
 import { PolygonDrawer } from '../../components/map/MapUtils';
 import { HybridSatelliteTiles } from '../../components/map/HybridSatelliteTiles';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { FieldLabel } from '../../components/ui/FieldLabel';
+import { formatarCpf } from '../../lib/cpf';
 
 initLeafletIcons();
 
@@ -29,8 +31,11 @@ const SUGESTOES_CULTURA = [
 export default function NovaArea() {
   const navigate = useNavigate();
   const { areaId } = useParams();
-  const { currentUser, areas, produtores, addArea, updateArea } = useAppContext();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { currentUser, areas, areaDrafts, produtores, loading, addArea, updateArea, saveAreaDraftLocally, saveAreaDraft, removeAreaDraft } = useAppContext();
   const areaEmEdicao = areaId ? areas.find(area => area.id === areaId) : undefined;
+  const [draftId] = useState(() => searchParams.get('rascunho') || crypto.randomUUID());
+  const draftCompleted = useRef(false);
 
   const [step, setStep] = useState(1);
   const totalSteps = 6;
@@ -51,6 +56,9 @@ export default function NovaArea() {
   const [culturaSugerida, setCulturaSugerida] = useState('');
   const [formError, setFormError] = useState<string[]>([]);
   const [edicaoCarregada, setEdicaoCarregada] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftSaveStatus, setDraftSaveStatus] = useState<'saving' | 'saved' | 'local' | 'error'>('saving');
+  const [draftSaveError, setDraftSaveError] = useState('');
   const [saving, setSaving] = useState(false);
 
   const produtorSelecionado = produtores.find((produtor) => produtor.id === formData.produtor_id);
@@ -72,39 +80,44 @@ export default function NovaArea() {
     nome: string;
     tensiometros: {
       id: string;
-      prof_cm: number;
-      camada_inicio_cm: number;
-      camada_fim_cm: number;
+      prof_cm: string;
+      camada_inicio_cm: string;
+      camada_fim_cm: string;
       tipo: 'decisao' | 'controle';
-      tensao_critica: number;
+      tensao_critica: string;
     }[];
   };
 
   const novoTensiometro = (sufixo = '') => ({
     id: `t_${Date.now()}${sufixo}`,
-    prof_cm: 15,
-    camada_inicio_cm: 0,
-    camada_fim_cm: 30,
+    prof_cm: '15',
+    camada_inicio_cm: '0',
+    camada_fim_cm: '30',
     tipo: 'decisao' as const,
-    tensao_critica: 40,
+    tensao_critica: '40',
   });
 
   const [setores, setSetores] = useState<SetorForm[]>([
     { id: 'setor_1', nome: 'Setor 1', tensiometros: [novoTensiometro()] }
   ]);
 
+  const handleNumericBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const { name, value } = e.currentTarget;
+    setFormData((current) => ({ ...current, [name]: formatarNumeroLocalizado(value) }));
+  };
+
   useEffect(() => {
     if (!areaEmEdicao || edicaoCarregada) return;
     setFormData({
       nome: areaEmEdicao.nome,
       produtor_id: areaEmEdicao.produtor_id,
-      coef_a: String(areaEmEdicao.solo.coef_a),
-      coef_b: String(areaEmEdicao.solo.coef_b),
-      umidade_cc: String(areaEmEdicao.solo.umidade_cc),
-      prof_raiz_mm: String(areaEmEdicao.planta.prof_raiz_mm),
-      eficiencia_ea: String(areaEmEdicao.irrigacao.eficiencia_ea),
-      vazao_ip: String(areaEmEdicao.irrigacao.vazao_ip),
-      pam: String(areaEmEdicao.irrigacao.pam),
+      coef_a: formatarNumeroLocalizado(String(areaEmEdicao.solo.coef_a)),
+      coef_b: formatarNumeroLocalizado(String(areaEmEdicao.solo.coef_b)),
+      umidade_cc: formatarNumeroLocalizado(String(areaEmEdicao.solo.umidade_cc)),
+      prof_raiz_mm: formatarNumeroLocalizado(String(areaEmEdicao.planta.prof_raiz_mm)),
+      eficiencia_ea: formatarNumeroLocalizado(String(areaEmEdicao.irrigacao.eficiencia_ea)),
+      vazao_ip: formatarNumeroLocalizado(String(areaEmEdicao.irrigacao.vazao_ip)),
+      pam: formatarNumeroLocalizado(String(areaEmEdicao.irrigacao.pam)),
     });
     setPolygonPoints(areaEmEdicao.poligono?.map(ponto => [ponto.lat, ponto.lng]) || []);
     const grupos = new Map<string, SetorForm>();
@@ -113,16 +126,78 @@ export default function NovaArea() {
       if (!grupos.has(nomeSetor)) grupos.set(nomeSetor, { id: `setor_edicao_${indice}`, nome: nomeSetor, tensiometros: [] });
       grupos.get(nomeSetor)!.tensiometros.push({
         id: tensiometro.id,
-        prof_cm: tensiometro.prof_cm,
-        camada_inicio_cm: tensiometro.camada_inicio_cm,
-        camada_fim_cm: tensiometro.camada_fim_cm,
+        prof_cm: String(tensiometro.prof_cm),
+        camada_inicio_cm: String(tensiometro.camada_inicio_cm),
+        camada_fim_cm: String(tensiometro.camada_fim_cm),
         tipo: tensiometro.tipo || (tensiometro.is_controle ? 'controle' : 'decisao'),
-        tensao_critica: tensiometro.tensao_critica,
+        tensao_critica: String(tensiometro.tensao_critica),
       });
     });
     if (grupos.size > 0) setSetores(Array.from(grupos.values()));
     setEdicaoCarregada(true);
   }, [areaEmEdicao, edicaoCarregada]);
+
+  useEffect(() => {
+    if (loading || draftReady || (areaId && !edicaoCarregada)) return;
+    const savedDraft = areaDrafts.find((draft) => draft.id === draftId);
+    if (savedDraft) {
+      setStep(savedDraft.step);
+      setFormData(savedDraft.formData);
+      setPolygonPoints(savedDraft.polygonPoints);
+      setCulturaSugerida(savedDraft.culturaSugerida);
+      setSetores(savedDraft.setores);
+    } else if (searchParams.has('rascunho')) {
+      setDraftSaveError('Este rascunho não foi encontrado na nuvem nem neste dispositivo. Você pode continuar criando a área.');
+      setDraftSaveStatus('error');
+    }
+    if (!searchParams.has('rascunho')) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set('rascunho', draftId);
+      setSearchParams(nextParams, { replace: true });
+    }
+    setDraftReady(true);
+  }, [loading, draftReady, areaId, edicaoCarregada, areaDrafts, draftId, searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!draftReady || !currentUser) return;
+    const timeout = window.setTimeout(() => {
+      setDraftSaveStatus('saving');
+      setDraftSaveError('');
+      void saveAreaDraft(criarRascunhoFormulario())
+        .then(() => setDraftSaveStatus('saved'))
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : '';
+          const savedLocally = message.startsWith('O rascunho foi salvo neste dispositivo');
+          setDraftSaveStatus(savedLocally ? 'local' : 'error');
+          setDraftSaveError(
+            savedLocally
+              ? message
+              : `Não foi possível salvar o rascunho: ${message || 'erro desconhecido.'}`,
+          );
+        });
+    }, 700);
+    return () => {
+      window.clearTimeout(timeout);
+      if (draftCompleted.current) return;
+      try {
+        saveAreaDraftLocally(criarRascunhoFormulario());
+      } catch (error) {
+        setDraftSaveStatus('error');
+        setDraftSaveError(
+          `Não foi possível salvar o rascunho neste dispositivo: ${error instanceof Error ? error.message : 'erro desconhecido.'}`,
+        );
+      }
+    };
+  }, [draftReady, currentUser, draftId, areaId, step, formData, polygonPoints, culturaSugerida, setores, saveAreaDraft, saveAreaDraftLocally]);
+
+  useEffect(() => {
+    if (!draftReady || !currentUser) return;
+    const saveBeforeUnload = () => {
+      saveAreaDraftLocally(criarRascunhoFormulario());
+    };
+    window.addEventListener('beforeunload', saveBeforeUnload);
+    return () => window.removeEventListener('beforeunload', saveBeforeUnload);
+  }, [draftReady, currentUser, draftId, areaId, step, formData, polygonPoints, culturaSugerida, setores, saveAreaDraftLocally]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormError([]);
@@ -135,36 +210,48 @@ export default function NovaArea() {
   };
 
   const criarRascunhoArea = (): Area => ({
-    id: areaEmEdicao?.id || `area_${Date.now()}`,
+    id: areaEmEdicao?.id || draftId,
     agronomo_id: areaEmEdicao?.agronomo_id || currentUser!.id,
     produtor_id: formData.produtor_id,
     nome: formData.nome,
-    ...(polygonPoints.length > 0
+    ...(polygonPoints.length >= 3
       ? { poligono: polygonPoints.map(([lat, lng]) => ({ lat, lng })) }
       : {}),
     solo: {
-      coef_a: Number(formData.coef_a),
-      coef_b: Number(formData.coef_b),
-      umidade_cc: Number(formData.umidade_cc),
+      coef_a: parseNumeroLocalizado(formData.coef_a),
+      coef_b: parseNumeroLocalizado(formData.coef_b),
+      umidade_cc: parseNumeroLocalizado(formData.umidade_cc),
     },
     planta: {
-      prof_raiz_mm: Number(formData.prof_raiz_mm),
+      prof_raiz_mm: parseNumeroLocalizado(formData.prof_raiz_mm),
     },
     irrigacao: {
-      eficiencia_ea: Number(formData.eficiencia_ea),
-      vazao_ip: Number(formData.vazao_ip),
-      pam: Number(formData.pam),
+      eficiencia_ea: parseNumeroLocalizado(formData.eficiencia_ea),
+      vazao_ip: parseNumeroLocalizado(formData.vazao_ip),
+      pam: parseNumeroLocalizado(formData.pam),
     },
     tensiometros: setores.flatMap((setor) => setor.tensiometros.map((sensor) => ({
       id: sensor.id,
-      prof_cm: sensor.prof_cm,
+      prof_cm: parseNumeroLocalizado(sensor.prof_cm),
       setor: setor.nome,
-      camada_inicio_cm: sensor.camada_inicio_cm,
-      camada_fim_cm: sensor.camada_fim_cm,
+      camada_inicio_cm: parseNumeroLocalizado(sensor.camada_inicio_cm),
+      camada_fim_cm: parseNumeroLocalizado(sensor.camada_fim_cm),
       tipo: sensor.tipo,
       is_controle: sensor.tipo === 'controle',
-      tensao_critica: sensor.tensao_critica,
+      tensao_critica: parseNumeroLocalizado(sensor.tensao_critica),
     }))),
+  });
+
+  const criarRascunhoFormulario = (): AreaDraft => ({
+    id: draftId,
+    agronomo_id: currentUser!.id,
+    ...(areaId ? { area_id: areaId } : {}),
+    step,
+    formData,
+    polygonPoints,
+    culturaSugerida,
+    setores,
+    updated_at: Date.now(),
   });
 
   const validarEtapaAtual = () => {
@@ -175,9 +262,13 @@ export default function NovaArea() {
       ];
     }
 
+    return [];
+  };
+
+  const obterAvisosEtapaAtual = () => {
     if (step === 2) {
       return polygonPoints.length > 0 && polygonPoints.length < 3
-        ? ['Adicione ao menos 3 pontos para completar o desenho da área, ou remova os pontos e deixe o mapa sem desenho.']
+        ? ['O desenho tem menos de 3 pontos e não será salvo como limite da área. Você pode continuar sem o polígono.']
         : [];
     }
 
@@ -191,9 +282,9 @@ export default function NovaArea() {
       ] as const;
 
       for (const [label, rawValue, minimum, maximum] of values) {
-        const value = Number(rawValue);
+        const value = parseNumeroLocalizado(rawValue);
         if (!rawValue.trim() || !Number.isFinite(value) || value < minimum || value > maximum) {
-          problems.push(`${label}: informe um valor entre ${minimum} e ${maximum}.`);
+          problems.push(`${label}: valor ausente ou fora do intervalo recomendado (${minimum} a ${maximum}).`);
         }
       }
       return problems;
@@ -208,9 +299,9 @@ export default function NovaArea() {
       ] as const;
 
       for (const [label, rawValue, minimum, maximum] of values) {
-        const value = Number(rawValue);
+        const value = parseNumeroLocalizado(rawValue);
         if (!rawValue.trim() || !Number.isFinite(value) || value < minimum || value > maximum) {
-          problems.push(`${label}: informe um valor entre ${minimum} e ${maximum}.`);
+          problems.push(`${label}: valor ausente ou fora do intervalo recomendado (${minimum} a ${maximum}).`);
         }
       }
       return problems;
@@ -221,7 +312,7 @@ export default function NovaArea() {
       const problemasNomes = setores.flatMap((setor) => {
         const nome = setor.nome.trim();
         const normalizado = nome.toLocaleLowerCase('pt-BR');
-        if (!nome) return ['Informe um nome para cada setor.'];
+        if (!nome) return ['Há um setor sem nome.'];
         if (nomesSetores.has(normalizado)) return [`O nome do setor "${nome}" está repetido.`];
         nomesSetores.add(normalizado);
         return [];
@@ -234,6 +325,8 @@ export default function NovaArea() {
 
     return [];
   };
+
+  const avisosEtapaAtual = obterAvisosEtapaAtual();
 
   const handleNextStep = () => {
     const problems = validarEtapaAtual();
@@ -284,6 +377,15 @@ export default function NovaArea() {
     }));
   };
 
+  const handleBlurTensiometro = (
+    setId: string,
+    tId: string,
+    campo: 'prof_cm' | 'camada_inicio_cm' | 'camada_fim_cm' | 'tensao_critica',
+    valor: string,
+  ) => {
+    handleUpdateTensiometro(setId, tId, { [campo]: formatarNumeroLocalizado(valor) });
+  };
+
   const handleRemoveTensiometro = (setId: string, tId: string) => {
     setFormError([]);
     setSetores(setores.map(s => {
@@ -305,13 +407,27 @@ export default function NovaArea() {
 
     const novaArea = criarRascunhoArea();
     setSaving(true);
+    let areaPublicada = false;
     try {
+      try {
+        await saveAreaDraft(criarRascunhoFormulario());
+      } catch (draftError) {
+        const message = draftError instanceof Error ? draftError.message : 'erro desconhecido.';
+        const savedLocally = message.startsWith('O rascunho foi salvo neste dispositivo');
+        setDraftSaveStatus(savedLocally ? 'local' : 'error');
+        setDraftSaveError(`${message} Tentando concluir a publicação da área.`);
+      }
       if (areaEmEdicao) await updateArea(novaArea);
       else await addArea(novaArea);
+      areaPublicada = true;
+      await removeAreaDraft(draftId);
+      draftCompleted.current = true;
       navigate('/agronomo/dashboard');
     } catch (error) {
       setFormError([
-        `Não foi possível salvar a área: ${error instanceof Error ? error.message : 'erro desconhecido.'}`,
+        areaPublicada
+          ? `A área foi publicada, mas não foi possível remover o rascunho: ${error instanceof Error ? error.message : 'erro desconhecido.'}`
+          : `Não foi possível salvar a área: ${error instanceof Error ? error.message : 'erro desconhecido.'}`,
       ]);
     } finally {
       setSaving(false);
@@ -338,7 +454,27 @@ export default function NovaArea() {
           <h1 className="text-3xl font-bold text-slate-800">{areaEmEdicao ? 'Revisar Parâmetros da Área' : 'Cadastrar Nova Área'}</h1>
           <p className="text-slate-500">Configuração dos parâmetros de irrigação e mapeamento</p>
         </div>
+        {draftReady && (
+          <div className={`ml-auto flex items-center gap-2 text-xs font-semibold ${
+            draftSaveStatus === 'saved' ? 'text-green-700' : draftSaveStatus === 'saving' ? 'text-slate-500' : 'text-amber-800'
+          }`}>
+            {draftSaveStatus === 'error' ? <CloudOff size={16} /> : <Cloud size={16} />}
+            <span>
+              {draftSaveStatus === 'saved' ? 'Rascunho salvo' :
+                draftSaveStatus === 'saving' ? 'Salvando rascunho…' :
+                  draftSaveStatus === 'local' ? 'Salvo neste dispositivo' : 'Falha ao salvar rascunho'}
+            </span>
+          </div>
+        )}
       </div>
+
+      {draftSaveError && (
+        <div role="status" className={`rounded-xl border p-4 text-sm ${
+          draftSaveStatus === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-amber-200 bg-amber-50 text-amber-900'
+        }`}>
+          {draftSaveError}
+        </div>
+      )}
 
       {/* Progress Bar */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-8 overflow-x-auto">
@@ -365,6 +501,14 @@ export default function NovaArea() {
             <p className="font-bold mb-2">Corrija esta etapa antes de continuar:</p>
             <ul className="list-disc pl-5 space-y-1">
               {formError.map(problema => <li key={problema}>{problema}</li>)}
+            </ul>
+          </div>
+        )}
+        {avisosEtapaAtual.length > 0 && (
+          <div className="m-6 mb-0 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">
+            <p className="font-bold mb-2">Atenção: revise estes dados quando possível. Você pode continuar e salvar a área.</p>
+            <ul className="list-disc pl-5 space-y-1">
+              {avisosEtapaAtual.map((aviso) => <li key={aviso}>{aviso}</li>)}
             </ul>
           </div>
         )}
@@ -395,7 +539,9 @@ export default function NovaArea() {
                       )}
                     {produtores.map((produtor) => (
                       <option key={produtor.id} value={produtor.id}>
-                        {produtor.nome}
+                        {produtor.cpf
+                          ? `${produtor.nome} — CPF ${formatarCpf(produtor.cpf)}`
+                          : produtor.nome}
                       </option>
                     ))}
                   </select>
@@ -470,19 +616,19 @@ export default function NovaArea() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <FieldLabel label="Coeficiente A (a)" tooltip="Constante ajustada em laboratório para a curva θ = A × ψ⁻ᴮ, usando ψ em kPa. Não use um valor genérico por textura." />
-                  <input type="number" step="0.001" min="0.001" max="1.5" name="coef_a" value={formData.coef_a} onChange={handleChange} placeholder="Valor do laudo" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="coef_a" value={formData.coef_a} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Valor do laudo" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Coeficiente B (b)" tooltip="Expoente ajustado em laboratório para a curva de retenção. Deve usar a mesma unidade de pressão adotada no sistema: kPa." />
-                  <input type="number" step="0.001" min="0.001" max="2" name="coef_b" value={formData.coef_b} onChange={handleChange} placeholder="Valor do laudo" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="coef_b" value={formData.coef_b} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Valor do laudo" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Umidade Capac. Campo (θcc)" tooltip="Umidade volumétrica na capacidade de campo (cm³/cm³). Valores típicos: 0.10–0.50." />
-                  <input type="number" step="0.001" min="0.01" max="1" name="umidade_cc" value={formData.umidade_cc} onChange={handleChange} placeholder="Ex: 0.280" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="umidade_cc" value={formData.umidade_cc} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: 0,280" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Profundidade Raiz (Z) – mm" tooltip="Profundidade efetiva do sistema radicular da cultura, usada para calcular o volume de água disponível no solo e o tempo de irrigação." />
-                  <input type="number" step="10" min="50" max="2000" name="prof_raiz_mm" value={formData.prof_raiz_mm} onChange={handleChange} placeholder="Ex: 400 (soja)" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="prof_raiz_mm" value={formData.prof_raiz_mm} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: 400 (soja)" className={inputClass} />
                 </div>
               </div>
             </div>
@@ -498,15 +644,15 @@ export default function NovaArea() {
               <div className="space-y-4">
                 <div>
                   <FieldLabel label="Eficiência (Ea)" tooltip="Fração da água aplicada que fica armazenada na zona radicular (0,00–1,00). Ex: 0,85 = 85%." />
-                  <input type="number" step="0.01" min="0.01" max="1.00" name="eficiencia_ea" value={formData.eficiencia_ea} onChange={handleChange} placeholder="Ex: 0.85 (85%)" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="eficiencia_ea" value={formData.eficiencia_ea} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: 0,85 (85%)" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Intensidade de Aplicação (Ip) – mm/h" tooltip="Lâmina média aplicada por hora sobre a área de referência. Para irrigação localizada, converta a vazão dos emissores usando seus espaçamentos." />
-                  <input type="number" step="0.1" min="0.1" max="100" name="vazao_ip" value={formData.vazao_ip} onChange={handleChange} placeholder="Valor medido em mm/h" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="vazao_ip" value={formData.vazao_ip} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Valor medido em mm/h" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="PAM – Porcentagem Área Molhada" tooltip="Porcentagem da área efetivamente molhada pelo sistema de irrigação (0,00–1,00). Ex: 0,40 = 40% para gotejamento, 1,00 = 100% para aspersão." />
-                  <input type="number" step="0.05" min="0.05" max="1.00" name="pam" value={formData.pam} onChange={handleChange} placeholder="Ex: 0.70" className={inputClass} />
+                  <input type="text" inputMode="decimal" name="pam" value={formData.pam} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: 0,70" className={inputClass} />
                 </div>
               </div>
             </div>
@@ -598,37 +744,34 @@ export default function NovaArea() {
                             <div>
                               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Instalação (cm)</label>
                               <input
-                                type="number"
+                                type="text"
+                                inputMode="decimal"
                                 value={t.prof_cm}
-                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { prof_cm: parseFloat(e.target.value) || 0 })}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { prof_cm: e.target.value })}
+                                onBlur={(e) => handleBlurTensiometro(setor.id, t.id, 'prof_cm', e.currentTarget.value)}
                                 className={inputClass}
-                                min={0}
-                                max={200}
-                                step={1}
                               />
                             </div>
                             <div>
                               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Camada inicial (cm)</label>
                               <input
-                                type="number"
+                                type="text"
+                                inputMode="decimal"
                                 value={t.camada_inicio_cm}
-                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { camada_inicio_cm: parseFloat(e.target.value) || 0 })}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { camada_inicio_cm: e.target.value })}
+                                onBlur={(e) => handleBlurTensiometro(setor.id, t.id, 'camada_inicio_cm', e.currentTarget.value)}
                                 className={inputClass}
-                                min={0}
-                                max={200}
-                                step={1}
                               />
                             </div>
                             <div>
                               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Camada final (cm)</label>
                               <input
-                                type="number"
+                                type="text"
+                                inputMode="decimal"
                                 value={t.camada_fim_cm}
-                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { camada_fim_cm: parseFloat(e.target.value) || 0 })}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { camada_fim_cm: e.target.value })}
+                                onBlur={(e) => handleBlurTensiometro(setor.id, t.id, 'camada_fim_cm', e.currentTarget.value)}
                                 className={inputClass}
-                                min={1}
-                                max={200}
-                                step={1}
                               />
                             </div>
                             <div>
@@ -645,13 +788,12 @@ export default function NovaArea() {
                             <div>
                               <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Tensão crítica (kPa)</label>
                               <input
-                                type="number"
+                                type="text"
+                                inputMode="decimal"
                                 value={t.tensao_critica}
-                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { tensao_critica: parseFloat(e.target.value) || 0 })}
+                                onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { tensao_critica: e.target.value })}
+                                onBlur={(e) => handleBlurTensiometro(setor.id, t.id, 'tensao_critica', e.currentTarget.value)}
                                 className={inputClass}
-                                min={0.1}
-                                max={100}
-                                step={0.1}
                                 disabled={t.tipo === 'controle'}
                               />
                             </div>

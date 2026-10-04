@@ -14,6 +14,14 @@ service cloud.firestore {
       return /databases/$(database)/documents/usuarios/$(userId);
     }
 
+    function blockedUserPath(userId) {
+      return /databases/$(database)/documents/usuarios_bloqueados/$(userId);
+    }
+
+    function deletionHistoryPath(historyId) {
+      return /databases/$(database)/documents/historico_exclusoes_agronomos/$(historyId);
+    }
+
     function hasRole(role) {
       return signedIn()
         && exists(userPath(uid()))
@@ -21,7 +29,9 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.token.admin == true;
+      return signedIn()
+        && hasRole('agronomo')
+        && get(userPath(uid())).data.cargo == 'admin';
     }
 
     function producerProfileExists(producerId) {
@@ -35,12 +45,32 @@ service cloud.firestore {
           'nome',
           'email',
           'tipo',
+          'cargo',
+          'cpf',
+          'cpf_prompted',
+          'troca_senha_pendente',
           'localizacao_sede',
           'criado_em'
         ])
         && data.nome is string
         && data.email is string
         && data.tipo in ['agronomo', 'produtor']
+        && (
+          !('cargo' in data)
+          || (data.cargo is string && data.cargo == 'admin' && data.tipo == 'agronomo')
+        )
+        && (
+          !('cpf' in data)
+          || (data.cpf is string && data.cpf.matches('^[0-9]{11}$') && data.tipo == 'produtor')
+        )
+        && (
+          !('cpf_prompted' in data)
+          || (data.cpf_prompted is bool && data.tipo == 'produtor')
+        )
+        && (
+          !('troca_senha_pendente' in data)
+          || (data.troca_senha_pendente is bool && data.tipo == 'agronomo')
+        )
         && (
           !('localizacao_sede' in data)
           || data.localizacao_sede is map
@@ -91,47 +121,182 @@ service cloud.firestore {
     }
 
     match /usuarios/{userId} {
-      allow get: if signedIn() && (uid() == userId || isAdmin());
-      allow list: if hasRole('agronomo')
-        && resource.data.tipo == 'produtor';
+      allow get: if signedIn() && uid() == userId;
+      allow list: if (
+          hasRole('agronomo')
+          && resource.data.tipo == 'produtor'
+        )
+        || (
+          isAdmin()
+          && resource.data.tipo == 'agronomo'
+        );
 
       allow create: if (
           signedIn()
           && uid() == userId
+          && !exists(blockedUserPath(userId))
           && request.resource.data.tipo == 'produtor'
           && request.resource.data.email == request.auth.token.email
+          && !('cargo' in request.resource.data)
           && validProfile(request.resource.data)
         )
         || (
           isAdmin()
-          && request.resource.data.tipo == 'agronomo'
+          && uid() != userId
+          && exists(blockedUserPath(userId))
+          && !existsAfter(blockedUserPath(userId))
           && validProfile(request.resource.data)
+          && request.resource.data == get(
+            deletionHistoryPath(get(blockedUserPath(userId)).data.exclusao_id)
+          ).data.perfil
         )
         || (
           hasRole('agronomo')
           && uid() != userId
+          && !exists(blockedUserPath(userId))
           && request.resource.data.tipo == 'agronomo'
+          && !('cargo' in request.resource.data)
           && validProfile(request.resource.data)
         );
 
-      allow update: if signedIn()
-        && uid() == userId
-        && request.resource.data.tipo == resource.data.tipo
-        && request.resource.data.email == resource.data.email
-        && request.resource.data.email == request.auth.token.email
-        && validProfile(request.resource.data);
+      allow update: if (
+          signedIn()
+          && uid() == userId
+          && request.resource.data.tipo == resource.data.tipo
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'nome',
+            'localizacao_sede',
+            'cpf',
+            'cpf_prompted',
+            'troca_senha_pendente'
+          ])
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['cpf'])
+            || resource.data.tipo == 'produtor'
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['cpf_prompted'])
+            || (
+              resource.data.tipo == 'produtor'
+              && request.resource.data.cpf_prompted == true
+            )
+          )
+          && (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['troca_senha_pendente'])
+            || (
+              resource.data.tipo == 'agronomo'
+              && resource.data.troca_senha_pendente == true
+              && request.resource.data.troca_senha_pendente == false
+            )
+          )
+          && validProfile(request.resource.data)
+        )
+        || (
+          isAdmin()
+          && uid() != userId
+          && resource.data.tipo == 'agronomo'
+          && request.resource.data.tipo == resource.data.tipo
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'cargo'])
+          && validProfile(request.resource.data)
+        );
 
-      allow delete: if isAdmin();
+      allow delete: if isAdmin()
+        && uid() != userId
+        && resource.data.tipo == 'agronomo'
+        && !('cargo' in resource.data)
+        && existsAfter(blockedUserPath(userId))
+        && existsAfter(deletionHistoryPath(
+          getAfter(blockedUserPath(userId)).data.exclusao_id
+        ))
+        && getAfter(deletionHistoryPath(
+          getAfter(blockedUserPath(userId)).data.exclusao_id
+        )).data.perfil == resource.data
+        && getAfter(deletionHistoryPath(
+          getAfter(blockedUserPath(userId)).data.exclusao_id
+        )).data.ator_uid == uid();
+    }
+
+    match /usuarios_bloqueados/{userId} {
+      allow get: if signedIn() && uid() == userId;
+      allow list: if false;
+      allow create: if isAdmin()
+        && uid() != userId
+        && exists(userPath(userId))
+        && get(userPath(userId)).data.tipo == 'agronomo'
+        && !('cargo' in get(userPath(userId)).data)
+        && request.resource.data.keys().hasOnly(['uid', 'bloqueado_em', 'exclusao_id'])
+        && request.resource.data.uid == userId
+        && request.resource.data.bloqueado_em == request.time
+        && request.resource.data.exclusao_id is string
+        && existsAfter(deletionHistoryPath(request.resource.data.exclusao_id))
+        && getAfter(deletionHistoryPath(request.resource.data.exclusao_id)).data.alvo_uid == userId
+        && getAfter(deletionHistoryPath(request.resource.data.exclusao_id)).data.perfil
+          == get(userPath(userId)).data
+        && getAfter(deletionHistoryPath(request.resource.data.exclusao_id)).data.ator_uid == uid();
+      allow delete: if isAdmin()
+        && uid() != userId
+        && existsAfter(userPath(userId))
+        && getAfter(userPath(userId)).data
+          == get(deletionHistoryPath(resource.data.exclusao_id)).data.perfil
+        && getAfter(deletionHistoryPath(resource.data.exclusao_id)).data.restaurado_em == request.time;
+      allow update: if false;
+    }
+
+    match /historico_exclusoes_agronomos/{historyId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'alvo_uid',
+          'alvo_nome',
+          'alvo_email',
+          'ator_uid',
+          'ator_nome',
+          'ator_email',
+          'excluido_em',
+          'perfil'
+        ])
+        && request.resource.data.alvo_uid is string
+        && request.resource.data.alvo_uid != uid()
+        && request.resource.data.alvo_nome == get(userPath(request.resource.data.alvo_uid)).data.nome
+        && request.resource.data.alvo_email == get(userPath(request.resource.data.alvo_uid)).data.email
+        && request.resource.data.perfil == get(userPath(request.resource.data.alvo_uid)).data
+        && request.resource.data.ator_uid == uid()
+        && request.resource.data.ator_nome == get(userPath(uid())).data.nome
+        && request.resource.data.ator_email == request.auth.token.email
+        && request.resource.data.excluido_em == request.time
+        && !existsAfter(userPath(request.resource.data.alvo_uid))
+        && existsAfter(blockedUserPath(request.resource.data.alvo_uid))
+        && getAfter(blockedUserPath(request.resource.data.alvo_uid)).data.exclusao_id == historyId;
+      allow update: if isAdmin()
+        && !('restaurado_em' in resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'restaurado_em',
+          'restaurado_por_uid',
+          'restaurado_por_nome'
+        ])
+        && request.resource.data.restaurado_em == request.time
+        && request.resource.data.restaurado_por_uid == uid()
+        && request.resource.data.restaurado_por_nome == get(userPath(uid())).data.nome
+        && existsAfter(userPath(resource.data.alvo_uid))
+        && getAfter(userPath(resource.data.alvo_uid)).data == resource.data.perfil
+        && !existsAfter(blockedUserPath(resource.data.alvo_uid));
+      allow delete: if false;
     }
 
     match /areas/{areaId} {
       allow get, list: if isAdmin()
         || (
-          signedIn()
+          hasRole('agronomo')
           && (
             resource.data.agronomo_id == uid()
-            || resource.data.produtor_id == uid()
           )
+        )
+        || (
+          hasRole('produtor')
+          && resource.data.produtor_id == uid()
         );
 
       allow create: if hasRole('agronomo')
@@ -151,6 +316,98 @@ service cloud.firestore {
       match /leituras/{leituraId} {
         allow read, write: if false;
       }
+    }
+
+    match /rascunhos_areas/{draftId} {
+      allow get, list: if hasRole('agronomo')
+        && resource.data.agronomo_id == uid();
+
+      allow create: if hasRole('agronomo')
+        && request.resource.data.agronomo_id == uid()
+        && request.resource.data.id == draftId
+        && request.resource.data.keys().hasAll([
+          'id',
+          'agronomo_id',
+          'step',
+          'formData',
+          'polygonPoints',
+          'culturaSugerida',
+          'setores',
+          'updated_at'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id',
+          'agronomo_id',
+          'area_id',
+          'step',
+          'formData',
+          'polygonPoints',
+          'culturaSugerida',
+          'setores',
+          'updated_at'
+        ])
+        && request.resource.data.step is int
+        && request.resource.data.step >= 1
+        && request.resource.data.step <= 6
+        && request.resource.data.formData is map
+        && request.resource.data.polygonPoints is list
+        && request.resource.data.culturaSugerida is string
+        && request.resource.data.setores is list
+        && request.resource.data.updated_at is int
+        && (
+          !('area_id' in request.resource.data)
+          || request.resource.data.area_id is string
+        );
+
+      allow update: if hasRole('agronomo')
+        && resource.data.agronomo_id == uid()
+        && request.resource.data.agronomo_id == uid()
+        && request.resource.data.id == draftId
+        && request.resource.data.keys().hasAll([
+          'id',
+          'agronomo_id',
+          'step',
+          'formData',
+          'polygonPoints',
+          'culturaSugerida',
+          'setores',
+          'updated_at'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id',
+          'agronomo_id',
+          'area_id',
+          'step',
+          'formData',
+          'polygonPoints',
+          'culturaSugerida',
+          'setores',
+          'updated_at'
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'area_id',
+          'step',
+          'formData',
+          'polygonPoints',
+          'culturaSugerida',
+          'setores',
+          'updated_at'
+        ])
+        && request.resource.data.step is int
+        && request.resource.data.step >= 1
+        && request.resource.data.step <= 6
+        && request.resource.data.formData is map
+        && request.resource.data.polygonPoints is list
+        && request.resource.data.culturaSugerida is string
+        && request.resource.data.setores is list
+        && request.resource.data.updated_at is int
+        && (
+          !('area_id' in request.resource.data)
+          || request.resource.data.area_id is string
+        );
+
+      allow delete: if hasRole('agronomo')
+        && resource.data.agronomo_id == uid();
     }
 
     match /{document=**} {

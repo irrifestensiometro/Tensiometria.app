@@ -87,26 +87,23 @@ const createAdmin = async () => {
   });
 
   try {
-    await auth.setCustomUserClaims(user.uid, {
-      role: 'agronomo',
-      admin: true,
-    });
     await getFirestore().collection('usuarios').doc(user.uid).set({
       nome: displayName,
       email,
       tipo: 'agronomo',
+      cargo: 'admin',
       criado_em: FieldValue.serverTimestamp(),
     });
   } catch (error) {
     console.error(
-      `A conta foi criada, mas o perfil ou as permissões não foram concluídos. UID: ${user.uid}. ` +
+      `A conta foi criada, mas o perfil não foi concluído. UID: ${user.uid}. ` +
       `Tente novamente com: npm run provision:user -- ${user.uid} agronomo --admin`,
     );
     throw error;
   }
 
   console.log(`Administrador agrônomo criado: ${email} (UID: ${user.uid}).`);
-  console.log('Entre novamente no app para carregar o novo papel de administrador.');
+  console.log('Atualize o app para carregar o novo papel de administrador.');
 };
 
 createAdmin().catch((error: unknown) => {

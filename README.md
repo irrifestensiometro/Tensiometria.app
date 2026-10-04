@@ -46,7 +46,7 @@ Cada setor agrupa seus proprios tensiometros e recebe um calculo independente de
 
 O app usa regras com permissao negada por padrao. Produtores e agronomos podem criar o proprio perfil apos autenticacao por e-mail ou Google, sem aprovacao. Um agronomo autenticado tambem pode criar outra conta de agronomo pelo painel; novos agronomos nao recebem privilegios de administrador. Para preencher a selecao de produtor, um agronomo autenticado pode consultar perfis com `tipo: "produtor"` na colecao `usuarios`. Essa permissao retorna os campos completos desses perfis, incluindo email e localizacao.
 
-**Importante:** publique `firestore.rules` atualizado no Console do Firestore para permitir cadastro automatico de produtores e agronomos e consulta dos perfis de produtores por agronomos. A regra exige que a consulta seja filtrada por `tipo == "produtor"`; sem essa publicacao, a lista retornara `permission-denied`.
+**Importante:** publique `firestore.rules` atualizado no Console do Firestore para permitir cadastro automatico de produtores e agronomos, consulta dos perfis de produtores por agronomos e sincronizacao de rascunhos de areas. A regra exige que a consulta seja filtrada por `tipo == "produtor"`; sem essa publicacao, a lista retornara `permission-denied`. Os rascunhos sao armazenados em `rascunhos_areas`, acessiveis somente pelo agronomo que os criou, e so viram areas visiveis ao produtor quando o cadastro e finalizado.
 
 ```powershell
 $env:FIREBASE_PROJECT_ID = "irrifes-tensiometria"
@@ -57,6 +57,22 @@ npm run provision:admin -- agro@adm.com "Agrônomo administrador"
 Execute esse comando uma unica vez para criar a conta inicial. O script pede a senha duas vezes sem mostrá-la na tela e exige no minimo 12 caracteres. Use uma senha nova, forte e diferente de qualquer senha compartilhada em mensagens. A credencial de servico deve ficar fora do repositorio; nao a envie ao navegador nem ao Git. O comando usa o Admin SDK localmente, sem Cloud Functions ou plano Blaze.
 
 Depois, qualquer agronomo autenticado pode criar outra conta pela dashboard, informando nome, e-mail e senha inicial. O cadastro de agronomo permanece indisponivel na tela de login e no formulario de contato. Publique as regras atualizadas para permitir a criacao do perfil por um agronomo ja autenticado; o auto-cadastro continua permitido apenas para produtores.
+
+### Gestao local e segura de agronomos
+
+O botao **Visualizar agronomos**, exibido abaixo de **Novo agronomo** para administradores, permite listar os perfis e editar nomes. A listagem e a edicao usam as regras do Firestore: apenas perfis com `tipo: "agronomo"` e `cargo: "admin"` podem consultar outros perfis de agronomo e alterar somente o campo `nome`. Nao ha Cloud Functions no projeto.
+
+Promocao, rebaixamento e exclusao de contas Authentication nao sao disponibilizados pelo app web; execute-os localmente com Firebase Admin SDK. O cargo fica em `usuarios/{UID}.cargo`, e as regras impedem usuarios de alterar esse campo pelo cliente. Configure o administrador inicial com o script `npm run provision:admin` descrito acima. Para operacoes posteriores, mantenha a credencial fora do repositorio:
+
+```powershell
+$env:FIREBASE_PROJECT_ID = "<ID_DO_PROJETO>"
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\caminho-seguro\firebase-admin.json"
+npm run provision:user -- <UID_DO_AGRONOMO> agronomo --admin
+npm run provision:user -- <UID_DO_ADMIN> agronomo --remove-admin
+npm run delete:agronomist -- <UID_DO_AGRONOMO>
+```
+
+Os scripts locais exigem credencial administrativa apenas no terminal confiavel. Promova outro administrador antes de rebaixar o ultimo admin. A exclusao e bloqueada para administradores e agronomos com areas vinculadas, e pede confirmacao digitando o UID completo. Nunca copie a credencial de servico para o app web, nem a commite ou envie a terceiros.
 
 O cadastro de produtor por formulario ou Google cria o perfil com `tipo: "produtor"` sem aprovacao. Tanto produtor quanto agronomo precisam ter perfil com o tipo correto para acessar o respectivo painel; tentar entrar no perfil errado encerra a sessao.
 

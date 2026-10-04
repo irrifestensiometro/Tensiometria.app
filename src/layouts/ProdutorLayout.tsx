@@ -31,7 +31,7 @@ export default function ProdutorLayout() {
         </Link>
         
         <div className="flex items-center gap-2 sm:gap-4">
-          <ProfileMenu roleLabel="Produtor Rural" />
+          <ProfileMenu role="produtor" roleLabel="Produtor Rural" />
         </div>
       </header>
       

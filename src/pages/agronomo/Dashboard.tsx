@@ -1,13 +1,32 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
-import { Activity, Map, Users, Plus, CheckCircle2, UserPlus, X } from 'lucide-react';
+import { Activity, Map, Users, Plus, CheckCircle2, UserPlus, X, Clock3, ArrowRight, Trash2, ShieldCheck, LoaderCircle, ShieldOff } from 'lucide-react';
 import { getAreaColor } from '../../lib/areaColors';
 import { criarContaDeAgronomo } from '../../lib/authService';
+import { DraftMapPreview } from '../../components/map/DraftMapPreview';
+import {
+  listAdminAgronomists,
+  listAgronomistDeletionHistory,
+  removeAgronomistProfile,
+  restoreAgronomistProfile,
+  type AgronomistDeletion,
+  setAgronomistAdminStatus,
+  type AdminAgronomist,
+} from '../../lib/adminAgronomistService';
 
 export default function AgronomoDashboard() {
   const navigate = useNavigate();
-  const { areas, produtores, currentUser } = useAppContext();
+  const {
+    areas,
+    areaDrafts,
+    isAdmin,
+    draftSyncError,
+    produtores,
+    currentUser,
+    removeArea,
+    removeAreaDraft,
+  } = useAppContext();
 
   const totalAreas = areas.length;
   const totalProdutores = new Set(areas.map((area) => area.produtor_id)).size;
@@ -19,6 +38,119 @@ export default function AgronomoDashboard() {
   const [newAgronomist, setNewAgronomist] = useState({ nome: '', email: '', password: '' });
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [deletingItem, setDeletingItem] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [showAgronomists, setShowAgronomists] = useState(false);
+  const [managedAgronomists, setManagedAgronomists] = useState<AdminAgronomist[]>([]);
+  const [deletionHistory, setDeletionHistory] = useState<AgronomistDeletion[]>([]);
+  const [loadingAgronomists, setLoadingAgronomists] = useState(false);
+  const [loadingDeletionHistory, setLoadingDeletionHistory] = useState(false);
+  const [showDeletionHistory, setShowDeletionHistory] = useState(false);
+  const [adminActionUid, setAdminActionUid] = useState<string | null>(null);
+  const [agronomistError, setAgronomistError] = useState('');
+
+  const handleDeleteDraft = async (draftId: string, name: string) => {
+    if (!window.confirm(`Excluir o rascunho "${name || 'Área sem nome'}"? Esta ação não pode ser desfeita.`)) return;
+    setDeletingItem(`draft:${draftId}`);
+    setDeleteError('');
+    try {
+      await removeAreaDraft(draftId);
+    } catch (error) {
+      setDeleteError(`Não foi possível excluir o rascunho: ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setDeletingItem(null);
+    }
+  };
+
+  const handleDeleteArea = async (areaId: string, name: string) => {
+    if (!window.confirm(`Excluir a área "${name}"? Esta ação não pode ser desfeita.`)) return;
+    setDeletingItem(`area:${areaId}`);
+    setDeleteError('');
+    try {
+      await removeArea(areaId);
+    } catch (error) {
+      setDeleteError(`Não foi possível excluir a área "${name}": ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setDeletingItem(null);
+    }
+  };
+
+  const openAgronomistRoster = async () => {
+    setShowAgronomists(true);
+    setAgronomistError('');
+    setLoadingAgronomists(true);
+    try {
+      setManagedAgronomists(await listAdminAgronomists());
+    } catch (error) {
+      setAgronomistError(`Não foi possível carregar os agrônomos: ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setLoadingAgronomists(false);
+    }
+  };
+
+  const handleToggleAgronomistAdmin = async (agronomist: AdminAgronomist) => {
+    setAgronomistError('');
+    setAdminActionUid(agronomist.uid);
+    try {
+      setManagedAgronomists(
+        await setAgronomistAdminStatus(agronomist.uid, !agronomist.isAdmin),
+      );
+    } catch (error) {
+      setAgronomistError(`Não foi possível alterar o cargo: ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setAdminActionUid(null);
+    }
+  };
+
+  const handleRemoveAgronomist = async (agronomist: AdminAgronomist) => {
+    const confirmed = window.confirm(
+      `Remover o perfil de ${agronomist.nome || agronomist.email}?\n\n`
+      + 'A conta continuará no Firebase Authentication, mas ficará bloqueada para usar o aplicativo. '
+      + 'Os dados já existentes não serão apagados. O perfil poderá ser restaurado pelo histórico de exclusões.',
+    );
+    if (!confirmed) return;
+
+    setAgronomistError('');
+    setAdminActionUid(agronomist.uid);
+    try {
+      setManagedAgronomists(await removeAgronomistProfile(agronomist.uid));
+    } catch (error) {
+      setAgronomistError(`Não foi possível remover o perfil: ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setAdminActionUid(null);
+    }
+  };
+
+  const openDeletionHistory = async () => {
+    setShowDeletionHistory(true);
+    setLoadingDeletionHistory(true);
+    setAgronomistError('');
+    try {
+      setDeletionHistory(await listAgronomistDeletionHistory());
+    } catch (error) {
+      setAgronomistError(`Não foi possível carregar o histórico: ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setLoadingDeletionHistory(false);
+    }
+  };
+
+  const handleRestoreAgronomist = async (deletion: AgronomistDeletion) => {
+    if (!window.confirm(
+      `Restaurar o perfil de ${deletion.targetName || deletion.targetEmail}?\n\n`
+      + 'O mesmo UID e os dados anteriores serão restaurados, e o agrônomo poderá voltar a acessar o aplicativo.',
+    )) return;
+
+    setAgronomistError('');
+    setAdminActionUid(deletion.id);
+    try {
+      setDeletionHistory(await restoreAgronomistProfile(deletion));
+      setManagedAgronomists(await listAdminAgronomists());
+    } catch (error) {
+      setAgronomistError(`Não foi possível restaurar o perfil: ${error instanceof Error ? error.message : 'erro desconhecido.'}`);
+    } finally {
+      setAdminActionUid(null);
+    }
+  };
 
   const handleCreateAgronomist = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -50,13 +182,25 @@ export default function AgronomoDashboard() {
           </h1>
           <p className="mt-2 text-sm text-slate-600 sm:text-base">Acompanhe suas áreas e o monitoramento agrícola.</p>
         </div>
-        <button
-          onClick={() => { setCreateError(''); setShowCreateAgronomist(true); }}
-          className="flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:w-auto"
-        >
-          <UserPlus size={18} />
-          <span>Novo agrônomo</span>
-        </button>
+        <div className="flex w-full shrink-0 flex-col gap-3 sm:w-auto">
+          <button
+            onClick={() => { setCreateError(''); setShowCreateAgronomist(true); }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+          >
+            <UserPlus size={18} />
+            <span>Novo agrônomo</span>
+          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => void openAgronomistRoster()}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#356b46] px-5 py-3 font-bold text-white shadow-sm transition-colors hover:bg-[#2a5538]"
+            >
+              <Users size={18} />
+              <span>Visualizar agrônomos</span>
+            </button>
+          )}
+        </div>
       </section>
 
       <section aria-label="Resumo da conta" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
@@ -112,8 +256,70 @@ export default function AgronomoDashboard() {
           </button>
         </div>
 
+        {draftSyncError && (
+          <div role="status" className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            {draftSyncError}
+          </div>
+        )}
+        {deleteError && (
+          <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            {deleteError}
+          </div>
+        )}
+
+        {areaDrafts.length > 0 && (
+          <section aria-labelledby="area-drafts-heading" className="mb-8">
+            <div className="mb-4 flex items-center gap-2">
+              <Clock3 size={19} className="text-amber-700" />
+              <h3 id="area-drafts-heading" className="text-lg font-bold text-slate-800">Cadastros em andamento</h3>
+            </div>
+            <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {areaDrafts.map((draft) => {
+                const producerName = produtores.find((producer) => producer.id === draft.formData.produtor_id)?.nome;
+                const continuePath = draft.area_id
+                  ? `/agronomo/areas/${draft.area_id}/editar?rascunho=${encodeURIComponent(draft.id)}`
+                  : `/agronomo/areas/nova?rascunho=${encodeURIComponent(draft.id)}`;
+                return (
+                  <li key={draft.id} className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Rascunho · Passo {draft.step} de 6</p>
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteDraft(draft.id, draft.formData.nome.trim())}
+                        disabled={deletingItem === `draft:${draft.id}`}
+                        aria-label={`Excluir rascunho ${draft.formData.nome || 'sem nome'}`}
+                        title="Excluir rascunho"
+                        className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-100 disabled:cursor-wait disabled:opacity-50"
+                      >
+                        <Trash2 size={17} />
+                      </button>
+                    </div>
+                    <div className="mt-3">
+                      <DraftMapPreview points={draft.polygonPoints} />
+                    </div>
+                    <h4 className="mt-2 truncate text-lg font-bold text-slate-900">
+                      {draft.formData.nome.trim() || 'Área sem nome'}
+                    </h4>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {producerName || 'Produtor ainda não selecionado'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate(continuePath)}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-700 px-4 py-3 font-bold text-white transition-colors hover:bg-amber-800"
+                    >
+                      Continuar cadastro
+                      <ArrowRight size={17} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
         <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 sm:gap-6">
-          {areas.length === 0 ? (
+          {areas.length === 0 && areaDrafts.length === 0 ? (
             <li className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center sm:py-14">
               <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
                 <Map size={26} />
@@ -149,9 +355,21 @@ export default function AgronomoDashboard() {
                           {produtores.find((produtor) => produtor.id === area.produtor_id)?.nome || 'Produtor vinculado'}
                         </p>
                       </div>
-                      <div className={"flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold border shrink-0 " + (area.tensiometros.length > 0 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-400 border-slate-200')}>
-                        <CheckCircle2 size={12} />
-                        <span>{area.tensiometros.length > 0 ? 'Ativo' : 'Inativo'}</span>
+                      <div className="flex shrink-0 items-start gap-2">
+                        <div className={"flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-bold border " + (area.tensiometros.length > 0 ? 'bg-green-50 text-green-700 border-green-100' : 'bg-slate-50 text-slate-400 border-slate-200')}>
+                          <CheckCircle2 size={12} />
+                          <span>{area.tensiometros.length > 0 ? 'Ativo' : 'Inativo'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteArea(area.id, area.nome)}
+                          disabled={deletingItem === `area:${area.id}`}
+                          aria-label={`Excluir área ${area.nome}`}
+                          title="Excluir área"
+                          className="rounded-lg p-2 text-red-600 transition-colors hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          <Trash2 size={17} />
+                        </button>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-2 mb-4">
@@ -185,6 +403,171 @@ export default function AgronomoDashboard() {
           )}
         </ul>
       </section>
+
+      {isAdmin && showAgronomists && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="agronomists-title"
+            className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+              <div>
+                <h2 id="agronomists-title" className="text-lg font-bold text-slate-900">Agrônomos do sistema</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {showDeletionHistory
+                    ? 'Histórico de exclusões e restauração de perfis.'
+                    : 'Gerencie os cargos de administrador e os perfis de agrônomo.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAgronomists(false)}
+                aria-label="Fechar lista de agrônomos"
+                className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100"
+              >
+                <X size={19} />
+              </button>
+            </div>
+            <div className="max-h-[calc(90vh-76px)] overflow-y-auto p-5 sm:p-6">
+              <button
+                type="button"
+                onClick={() => {
+                  if (showDeletionHistory) {
+                    setShowDeletionHistory(false);
+                    setAgronomistError('');
+                  } else {
+                    void openDeletionHistory();
+                  }
+                }}
+                className="mb-4 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {showDeletionHistory ? 'Voltar aos agrônomos' : 'Ver histórico de exclusões'}
+              </button>
+              {agronomistError && (
+                <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  {agronomistError}
+                </div>
+              )}
+              {showDeletionHistory && loadingDeletionHistory ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm font-medium text-slate-500">
+                  <LoaderCircle size={19} className="animate-spin" />
+                  Carregando histórico...
+                </div>
+              ) : showDeletionHistory && !agronomistError && deletionHistory.length === 0 ? (
+                <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Nenhuma exclusão de perfil foi registrada.</p>
+              ) : showDeletionHistory && !agronomistError ? (
+                <ul className="divide-y divide-slate-100">
+                  {deletionHistory.map((deletion) => {
+                    const busy = adminActionUid === deletion.id;
+                    return (
+                      <li key={deletion.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-slate-800">
+                            {deletion.targetName || 'Sem nome'} <span className="font-normal text-slate-500">({deletion.targetEmail})</span>
+                          </p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Excluído por {deletion.actorName || deletion.actorUid}
+                            {deletion.actorEmail ? ` (${deletion.actorEmail})` : ''}
+                            {deletion.deletedAt
+                              ? ` em ${deletion.deletedAt.toLocaleString('pt-BR')}`
+                              : ''}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-400">UID: {deletion.targetUid}</p>
+                          {deletion.restoredAt && (
+                            <p className="mt-1 text-xs font-semibold text-emerald-700">
+                              Restaurado em {deletion.restoredAt.toLocaleString('pt-BR')}
+                            </p>
+                          )}
+                        </div>
+                        {!deletion.restoredAt && (
+                          <button
+                            type="button"
+                            onClick={() => void handleRestoreAgronomist(deletion)}
+                            disabled={busy}
+                            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            {busy
+                              ? <LoaderCircle size={14} className="animate-spin" />
+                              : <ShieldCheck size={14} />}
+                            Restaurar perfil
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : loadingAgronomists ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-sm font-medium text-slate-500">
+                  <LoaderCircle size={19} className="animate-spin" />
+                  Carregando agrônomos...
+                </div>
+              ) : !agronomistError && managedAgronomists.length === 0 ? (
+                <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Nenhum perfil de agrônomo foi encontrado.</p>
+              ) : !agronomistError && (
+                <ul className="divide-y divide-slate-100">
+                  {managedAgronomists.map((agronomist) => {
+                    const busy = adminActionUid === agronomist.uid;
+                    const isCurrentUser = currentUser?.id === agronomist.uid;
+                    return (
+                      <li key={agronomist.uid} className="flex flex-col gap-3 py-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="truncate font-semibold text-slate-800">{agronomist.nome || 'Sem nome'}</p>
+                              {agronomist.isAdmin && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-800">
+                                  <ShieldCheck size={13} />
+                                  Admin
+                                </span>
+                              )}
+                              {isCurrentUser && <span className="text-xs text-slate-400">Você</span>}
+                            </div>
+                            <p className="mt-1 truncate text-sm text-slate-500">{agronomist.email}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {!isCurrentUser && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleToggleAgronomistAdmin(agronomist)}
+                                  disabled={busy}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50"
+                                >
+                                  {agronomist.isAdmin ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
+                                  {agronomist.isAdmin ? 'Remover admin' : 'Tornar admin'}
+                                </button>
+                                {!agronomist.isAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleRemoveAgronomist(agronomist)}
+                                    disabled={busy}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                                  >
+                                    <Trash2 size={14} />
+                                    Remover perfil
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        {busy && (
+                          <p className="flex items-center gap-2 text-xs text-slate-500">
+                            <LoaderCircle size={14} className="animate-spin" />
+                            Aplicando alteração...
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       {showCreateAgronomist && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">

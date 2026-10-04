@@ -9,11 +9,24 @@ import { auth } from './firebase';
 import {
   buscarUsuario,
   criarPerfilAgronomoAdministrativamente,
+  concluirTrocaSenhaInicial,
   garantirPerfilUsuario,
   type UsuarioData,
 } from './usuarioService';
 
 export type UserRole = UsuarioData['tipo'];
+
+export const trocarSenhaInicialAgronomo = async (novaSenha: string) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Não há uma conta autenticada para trocar a senha.');
+  const profile = await buscarUsuario(user.uid);
+  if (profile?.tipo !== 'agronomo' || profile.troca_senha_pendente !== true) {
+    throw new Error('Esta conta não possui uma troca de senha inicial pendente.');
+  }
+
+  await updatePassword(user, novaSenha);
+  await concluirTrocaSenhaInicial(user.uid);
+};
 
 export const alterarSenhaAgronomo = async (senhaAtual: string, novaSenha: string) => {
   const user = auth.currentUser;

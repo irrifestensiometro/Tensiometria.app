@@ -10,10 +10,10 @@ const projectId = process.env.FIREBASE_PROJECT_ID;
 if (
   !uid
   || (role !== 'agronomo' && role !== 'produtor')
-  || (adminOption !== undefined && adminOption !== '--admin')
-  || (adminOption === '--admin' && role !== 'agronomo')
+  || (adminOption !== undefined && adminOption !== '--admin' && adminOption !== '--remove-admin')
+  || (adminOption !== undefined && role !== 'agronomo')
 ) {
-  console.error('Uso: npm run provision:user -- <UID> <agronomo|produtor> [--admin]');
+  console.error('Uso: npm run provision:user -- <UID> <agronomo|produtor> [--admin|--remove-admin]');
   process.exit(1);
 }
 
@@ -36,15 +36,31 @@ const provisionUser = async (userId: string, userRole: AppRole) => {
   if (!user.email) {
     throw new Error('O usuario do Firebase Authentication precisa ter um e-mail.');
   }
-
-  const customClaims = {
-    ...user.customClaims,
-  };
-  if (adminOption === '--admin') customClaims.admin = true;
-  await auth.setCustomUserClaims(userId, customClaims);
-
   const profileRef = firestore.collection('usuarios').doc(userId);
   const existingProfile = await profileRef.get();
+  const existingRole = existingProfile.data()?.tipo;
+  if (existingProfile.exists && existingRole !== userRole) {
+    throw new Error(`O perfil ja esta cadastrado como "${String(existingRole)}"; nao e permitido trocar o tipo por este comando.`);
+  }
+  if (adminOption && (!existingProfile.exists || existingRole !== 'agronomo')) {
+    throw new Error('Promocao e remocao de admin exigem um perfil de agronomo existente.');
+  }
+  if (userRole === 'produtor' && existingProfile.data()?.cargo === 'admin') {
+    throw new Error('Uma conta administradora nao pode ser provisionada como produtor.');
+  }
+
+  if (adminOption === '--remove-admin' && existingProfile.data()?.cargo === 'admin') {
+    const administrators = await firestore.collection('usuarios')
+      .where('cargo', '==', 'admin')
+      .get();
+    const otherAdminExists = administrators.docs.some((profile) =>
+      profile.id !== userId && profile.data().tipo === 'agronomo',
+    );
+    if (!otherAdminExists) {
+      throw new Error('Nao e permitido remover o ultimo administrador. Promova outro agronomo primeiro.');
+    }
+  }
+
   const profile: Record<string, unknown> = {
     nome: user.displayName || user.email,
     email: user.email,
@@ -52,11 +68,14 @@ const provisionUser = async (userId: string, userRole: AppRole) => {
   };
   if (!existingProfile.exists) {
     profile.criado_em = FieldValue.serverTimestamp();
+    if (userRole === 'agronomo') profile.troca_senha_pendente = true;
   }
+  if (adminOption === '--admin') profile.cargo = 'admin';
+  if (adminOption === '--remove-admin') profile.cargo = FieldValue.delete();
   await profileRef.set(profile, { merge: true });
 
   console.log(`Papel "${userRole}" provisionado para ${user.email} (${userId}).`);
-  console.log('O usuario deve sair e entrar novamente para atualizar o token.');
+  console.log('Atualize o app para carregar as alteracoes do perfil.');
 };
 
 provisionUser(uid, role as AppRole).catch((error: unknown) => {

@@ -1,6 +1,7 @@
 import {
   doc,
   collection,
+  deleteField,
   getDoc,
   getDocs,
   query,
@@ -17,6 +18,10 @@ export interface UsuarioData {
   nome: string;
   email: string;
   tipo: "agronomo" | "produtor";
+  cargo?: "admin";
+  cpf?: string;
+  cpf_prompted?: boolean;
+  troca_senha_pendente?: boolean;
   localizacao_sede?: { lat: number; lng: number };
 }
 
@@ -30,6 +35,7 @@ export const criarPerfilUsuario = async (
     nome,
     email,
     tipo,
+    ...(tipo === "produtor" ? { cpf_prompted: false } : {}),
     criado_em: serverTimestamp(),
   });
 };
@@ -77,6 +83,7 @@ export const listarProdutoresParaVinculo = async (): Promise<ProdutorOpcao[]> =>
       if (typeof nome !== "string" || !nome.trim()) return null;
 
       const location = data.localizacao_sede;
+      const cpf = typeof data.cpf === "string" ? data.cpf : undefined;
       const localizacao_sede = location
         && typeof location.lat === "number"
         && Number.isFinite(location.lat)
@@ -92,6 +99,7 @@ export const listarProdutoresParaVinculo = async (): Promise<ProdutorOpcao[]> =>
       return {
         id: producerDoc.id,
         nome,
+        ...(cpf ? { cpf } : {}),
         ...(localizacao_sede ? { localizacao_sede } : {}),
       };
     })
@@ -108,15 +116,40 @@ export const criarPerfilAgronomoAdministrativamente = async (
     nome,
     email,
     tipo: "agronomo",
+    troca_senha_pendente: true,
     criado_em: serverTimestamp(),
+  });
+};
+
+export const concluirCadastroCpfProdutor = async (uid: string, cpf?: string) => {
+  await updateDoc(doc(db, "usuarios", uid), {
+    ...(cpf ? { cpf } : {}),
+    cpf_prompted: true,
+  });
+};
+
+export const concluirTrocaSenhaInicial = async (uid: string) => {
+  await updateDoc(doc(db, "usuarios", uid), {
+    troca_senha_pendente: false,
   });
 };
 
 export const atualizarPerfilProdutor = async (
   uid: string,
-  data: Pick<UsuarioData, "nome" | "localizacao_sede">,
+  data: Pick<UsuarioData, "nome" | "localizacao_sede"> & { cpf?: string | null },
 ) => {
-  await updateDoc(doc(db, "usuarios", uid), data);
+  const { cpf, ...profileData } = data;
+  if (cpf === null) {
+    await updateDoc(doc(db, "usuarios", uid), {
+      ...profileData,
+      cpf: deleteField(),
+    });
+    return;
+  }
+  await updateDoc(doc(db, "usuarios", uid), {
+    ...profileData,
+    ...(cpf ? { cpf } : {}),
+  });
 };
 
 export const buscarUsuario = async (uid: string) => {

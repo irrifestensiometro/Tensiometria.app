@@ -9,6 +9,7 @@ export interface Produtor {
   id: string;
   nome: string;
   email: string;
+  cpf?: string;
   senha?: string;
   localizacao_sede?: { lat: number; lng: number };
 }
@@ -16,6 +17,7 @@ export interface Produtor {
 export interface ProdutorOpcao {
   id: string;
   nome: string;
+  cpf?: string;
   localizacao_sede?: { lat: number; lng: number };
 }
 
@@ -50,6 +52,39 @@ export interface Area {
     pam: number; // Porcentagem de Área Molhada (em decimal, ex: 0.7 para 70%)
   };
   tensiometros: Tensiometro[];
+}
+
+export interface AreaDraft {
+  id: string;
+  agronomo_id: string;
+  area_id?: string;
+  step: number;
+  formData: {
+    nome: string;
+    produtor_id: string;
+    coef_a: string;
+    coef_b: string;
+    umidade_cc: string;
+    prof_raiz_mm: string;
+    eficiencia_ea: string;
+    vazao_ip: string;
+    pam: string;
+  };
+  polygonPoints: [number, number][];
+  culturaSugerida: string;
+  setores: {
+    id: string;
+    nome: string;
+    tensiometros: {
+      id: string;
+      prof_cm: string;
+      camada_inicio_cm: string;
+      camada_fim_cm: string;
+      tipo: 'decisao' | 'controle';
+      tensao_critica: string;
+    }[];
+  }[];
+  updated_at: number;
 }
 
 export interface LeituraValor {
