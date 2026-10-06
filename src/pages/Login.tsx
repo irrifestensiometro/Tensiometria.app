@@ -140,8 +140,15 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row font-sans">
-      <div className="hidden md:flex w-full md:w-1/2 bg-[#2D7D46] text-white p-6 md:p-16 flex-col justify-between">
-        <div>
+      <div className="relative hidden w-full isolate flex-col justify-between overflow-hidden bg-[#2D7D46] p-6 text-white md:flex md:w-1/2 md:p-16">
+        <img
+          src="/images/background-login.jpg"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover object-center"
+        />
+        <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-br from-emerald-950/35 via-emerald-950/15 to-slate-950/45" />
+        <div className="relative z-10">
           <div className="flex items-center space-x-2 mb-16">
             <div className="bg-white/20 p-2 rounded-lg">
               <Droplet size={24} className="text-white" />
@@ -191,7 +198,7 @@ export default function Login() {
           </div>
         </div>
 
-        <div className="mt-12 text-xs text-emerald-200 opacity-60">
+        <div className="relative z-10 mt-12 text-xs text-white/80">
           &copy; 2024 IRRIFES Tensiometria. Todos os direitos reservados.
         </div>
       </div>

@@ -5,6 +5,7 @@ import { Droplet } from 'lucide-react';
 import ProfileMenu from '../components/ProfileMenu';
 import AILoadingState from '../components/ui/AILoadingState';
 import WorkspaceNavigation from '../components/WorkspaceNavigation';
+import WorkspaceFooter from '../components/WorkspaceFooter';
 
 export default function AgronomoLayout() {
   const { userRole, currentUser, loading } = useAppContext();
@@ -38,6 +39,7 @@ export default function AgronomoLayout() {
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 pt-5 pb-24 sm:px-6 sm:pt-8 sm:pb-24 lg:px-8 lg:pb-10">
         <Outlet />
       </main>
+      <WorkspaceFooter />
       <WorkspaceNavigation role="agronomo" />
     </div>
   );

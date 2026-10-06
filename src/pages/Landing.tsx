@@ -42,12 +42,19 @@ export default function Landing() {
       </nav>
 
       {/* ---- HERO ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-[#f0faf0] via-white to-[#faf5f0]">
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{
-          backgroundImage: `radial-gradient(circle at 20% 50%, #356b46 0%, transparent 50%), radial-gradient(circle at 80% 20%, #b57d59 0%, transparent 50%)`
-        }} />
-        <div className="max-w-7xl mx-auto px-6 md:px-10 py-20 md:py-32 relative">
-          <div className="max-w-3xl">
+      <section className="relative isolate min-h-[540px] overflow-hidden bg-[#f5f2e7] md:min-h-[600px]">
+        <img
+          src="/images/hero-irrigacao.jpg"
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full object-cover object-[62%_center] md:object-center"
+        />
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 bg-[linear-gradient(90deg,rgba(248,246,235,0.97)_0%,rgba(248,246,235,0.9)_38%,rgba(248,246,235,0.58)_62%,rgba(248,246,235,0.08)_100%)]"
+        />
+        <div className="relative mx-auto flex min-h-[540px] w-full max-w-7xl items-center px-6 py-16 md:min-h-[600px] md:px-10 md:py-20">
+          <div className="max-w-2xl">
             <div className="flex items-center space-x-2 mb-6">
               <div className="bg-[#356b46]/10 p-2 rounded-lg">
                 <Droplet size={20} className="text-[#356b46]" />
@@ -55,13 +62,13 @@ export default function Landing() {
               <span className="text-sm font-semibold text-[#356b46] tracking-wider uppercase">IRRIFES Tensiometria</span>
             </div>
 
-            <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold text-slate-800 leading-[1.05] tracking-tight mb-6">
+            <h1 className="mb-6 text-4xl font-extrabold leading-[1.05] tracking-tight text-slate-900 md:text-6xl lg:text-7xl">
               A física do solo traduzida na{' '}
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#356b46] to-[#2D7D46]">decisão certa</span>
               {' '}de irrigação.
             </h1>
 
-            <p className="text-lg md:text-xl text-slate-500 max-w-2xl leading-relaxed mb-10">
+            <p className="mb-10 max-w-xl text-lg leading-relaxed text-slate-700 md:text-xl">
               O IRRIFES conecta a precisão do agrônomo à rotina do produtor rural, garantindo o manejo ideal da água por tensiometria em tempo real.
             </p>
 
@@ -98,59 +105,68 @@ export default function Landing() {
       </section>
 
       {/* ---- COMO FUNCIONA ---- */}
-      <section id="como-funciona" className="bg-gradient-to-br from-[#f0faf0] via-white to-[#faf5f0] py-20 md:py-28">
-        <div className="max-w-7xl mx-auto px-6 md:px-10">
-          <div className="text-center mb-16">
-            <span className="text-xs font-bold text-[#356b46] tracking-[0.2em] uppercase bg-[#356b46]/5 px-4 py-2 rounded-full">Como Funciona</span>
-            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-800 mt-4">Duas visões, um único objetivo</h2>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8 md:gap-12">
-            {/* Card Produtor */}
-            <div className="bg-white rounded-3xl p-8 md:p-10 shadow-xl shadow-slate-200/50 border border-slate-100 relative overflow-hidden group hover:shadow-2xl transition-shadow">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-[#b57d59]/5 rounded-bl-full" />
-              <div className="relative">
-                <div className="bg-[#b57d59]/10 p-4 rounded-2xl w-fit mb-6">
-                  <Tractor size={32} className="text-[#b57d59]" />
-                </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-2">Para o Produtor Rural</h3>
-                <p className="text-slate-500 text-sm mb-6">Tecnologia que simplifica o dia a dia no campo.</p>
-                <ul className="space-y-4">
-                  {[
-                    'Simplicidade no campo: input rápido de leituras',
-                    'Respostas diretas de quando e quanto irrigar',
-                    'Visualização por mapas georreferenciados',
-                  ].map(item => (
-                    <li key={item} className="flex items-start space-x-3">
-                      <CheckCircle2 size={18} className="text-[#b57d59] shrink-0 mt-0.5" />
-                      <span className="text-slate-600 text-sm">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+      <section id="como-funciona" className="bg-white px-4 py-12 sm:px-6 md:py-16">
+        <div className="relative isolate mx-auto max-w-7xl overflow-hidden rounded-3xl bg-[#f3f3e9] px-6 py-16 shadow-sm md:px-10 md:py-20">
+          <img
+            src="/images/background-visoes.jpg"
+            alt=""
+            aria-hidden="true"
+            className="absolute inset-0 -z-20 h-full w-full object-cover object-center"
+          />
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-white/20" />
+          <div className="relative">
+            <div className="text-center mb-16">
+              <span className="text-xs font-bold text-[#356b46] tracking-[0.2em] uppercase bg-white/90 px-4 py-2 rounded-full shadow-sm">Como Funciona</span>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-slate-800 mt-4">Duas visões, um único objetivo</h2>
             </div>
 
-            {/* Card Agrônomo */}
-            <div className="bg-white rounded-3xl p-8 md:p-10 shadow-xl shadow-slate-200/50 border border-slate-100 relative overflow-hidden group hover:shadow-2xl transition-shadow">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-[#356b46]/5 rounded-bl-full" />
-              <div className="relative">
-                <div className="bg-[#356b46]/10 p-4 rounded-2xl w-fit mb-6">
-                  <Users size={32} className="text-[#356b46]" />
+            <div className="grid md:grid-cols-2 gap-8 md:gap-12">
+              {/* Card Produtor */}
+              <div className="bg-white/90 backdrop-blur-sm rounded-3xl p-8 md:p-10 shadow-xl shadow-slate-900/10 border border-white/80 relative overflow-hidden group hover:shadow-2xl transition-shadow">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-[#b57d59]/5 rounded-bl-full" />
+                <div className="relative">
+                  <div className="bg-[#b57d59]/10 p-4 rounded-2xl w-fit mb-6">
+                    <Tractor size={32} className="text-[#b57d59]" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Para o Produtor Rural</h3>
+                  <p className="text-slate-500 text-sm mb-6">Tecnologia que simplifica o dia a dia no campo.</p>
+                  <ul className="space-y-4">
+                    {[
+                      'Simplicidade no campo: input rápido de leituras',
+                      'Respostas diretas de quando e quanto irrigar',
+                      'Visualização por mapas georreferenciados',
+                    ].map(item => (
+                      <li key={item} className="flex items-start space-x-3">
+                        <CheckCircle2 size={18} className="text-[#b57d59] shrink-0 mt-0.5" />
+                        <span className="text-slate-600 text-sm">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <h3 className="text-2xl font-bold text-slate-800 mb-2">Para o Agrônomo / Consultor</h3>
-                <p className="text-slate-500 text-sm mb-6">Precisão técnica para gestão profissional.</p>
-                <ul className="space-y-4">
-                  {[
-                    'Precisão técnica (θcc, θpmp, Z, Ea, Ip, tensão crítica)',
-                    'Desenho e gestão de polígonos por área no mapa',
-                    'Gestão centralizada de múltiplos produtores e histórico de dados',
-                  ].map(item => (
-                    <li key={item} className="flex items-start space-x-3">
-                      <CheckCircle2 size={18} className="text-[#356b46] shrink-0 mt-0.5" />
-                      <span className="text-slate-600 text-sm">{item}</span>
-                    </li>
-                  ))}
-                </ul>
+              </div>
+
+              {/* Card Agrônomo */}
+              <div className="bg-white/90 backdrop-blur-sm rounded-3xl p-8 md:p-10 shadow-xl shadow-slate-900/10 border border-white/80 relative overflow-hidden group hover:shadow-2xl transition-shadow">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-[#356b46]/5 rounded-bl-full" />
+                <div className="relative">
+                  <div className="bg-[#356b46]/10 p-4 rounded-2xl w-fit mb-6">
+                    <Users size={32} className="text-[#356b46]" />
+                  </div>
+                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Para o Agrônomo / Consultor</h3>
+                  <p className="text-slate-500 text-sm mb-6">Precisão técnica para gestão profissional.</p>
+                  <ul className="space-y-4">
+                    {[
+                      'Precisão técnica (θcc, θpmp, Z, Ea, Ip, tensão crítica)',
+                      'Desenho e gestão de polígonos por área no mapa',
+                      'Gestão centralizada de múltiplos produtores e histórico de dados',
+                    ].map(item => (
+                      <li key={item} className="flex items-start space-x-3">
+                        <CheckCircle2 size={18} className="text-[#356b46] shrink-0 mt-0.5" />
+                        <span className="text-slate-600 text-sm">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
