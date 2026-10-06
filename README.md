@@ -30,6 +30,19 @@ Aplicacao web para acompanhamento de tensiometria e irrigacao.
 
 5. Abra [http://localhost:3000](http://localhost:3000). O servidor fica vinculado ao loopback local. Reinicie-o depois de alterar `.env.local`.
 
+## Instalar como aplicativo (PWA)
+
+Nos paineis de produtor e agronomo, abra o menu do perfil e escolha **Instalar aplicativo**. Em navegadores compativeis, o IRRIFES abre o fluxo nativo de instalacao; nos demais, mostra como adicionar o app a tela inicial ou ao menu de aplicativos. No iPhone e iPad, use o Safari e escolha **Compartilhar > Adicionar a Tela de Inicio**.
+
+Para testar a instalacao localmente, gere e sirva a versao de producao em `localhost`:
+
+```powershell
+npm run build
+npm run preview
+```
+
+Depois abra o endereco informado pelo Vite Preview (por padrao, `http://localhost:4173`). O servidor de desenvolvimento (`npm run dev`) nao registra o service worker. Em producao, publique o site em HTTPS e mantenha acessiveis `/manifest.webmanifest`, `/service-worker.js` e os icones em `/icons/`. O service worker armazena a interface e os recursos compilados para permitir abrir a estrutura do app sem conexao; autenticacao, dados do Firebase, mapas e outras integracoes online continuam dependendo de internet.
+
 ## Verificacoes
 
 ```powershell

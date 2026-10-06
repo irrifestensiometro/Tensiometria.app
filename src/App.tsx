@@ -23,6 +23,7 @@ import AgronomoDetalhesArea from './pages/agronomo/DetalhesArea';
 import NovaArea from './pages/agronomo/NovaArea';
 import { FirstLoginPrompts } from './components/FirstLoginPrompts';
 import Profile from './pages/Profile';
+import { PwaInstallProvider } from './context/PwaInstallContext';
 
 function RootRedirect() {
   const { userRole, loading } = useAppContext();
@@ -36,36 +37,38 @@ function RootRedirect() {
 export default function App() {
   return (
     <AppProvider>
-      <Router>
-        <FirstLoginPrompts />
-        <Routes>
-          <Route path="/" element={<RootRedirect />} />
-          <Route path="/login/:type" element={<Login />} />
-          <Route path="/contato" element={<Contato />} />
-          <Route path="/selecionar-tipo" element={<RoleSelect />} />
-          
-          {/* Rotas Produtor */}
-          <Route path="/produtor" element={<ProdutorLayout />}>
-            <Route path="dashboard" element={<ProdutorDashboard />} />
-            <Route path="perfil" element={<Profile role="produtor" />} />
-            <Route path="areas/:areaId" element={<DetalhesArea />} />
-            <Route path="leituras/nova" element={<NovaLeitura />} />
-            <Route index element={<Navigate to="dashboard" replace />} />
-          </Route>
+      <PwaInstallProvider>
+        <Router>
+          <FirstLoginPrompts />
+          <Routes>
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="/login/:type" element={<Login />} />
+            <Route path="/contato" element={<Contato />} />
+            <Route path="/selecionar-tipo" element={<RoleSelect />} />
 
-          {/* Rotas Agrônomo */}
-          <Route path="/agronomo" element={<AgronomoLayout />}>
-            <Route path="dashboard" element={<AgronomoDashboard />} />
-            <Route path="perfil" element={<Profile role="agronomo" />} />
-            <Route path="areas/nova" element={<NovaArea />} />
-            <Route path="areas/:areaId/editar" element={<NovaArea />} />
-            <Route path="areas/:areaId" element={<AgronomoDetalhesArea />} />
-            <Route index element={<Navigate to="dashboard" replace />} />
-          </Route>
+            {/* Rotas Produtor */}
+            <Route path="/produtor" element={<ProdutorLayout />}>
+              <Route path="dashboard" element={<ProdutorDashboard />} />
+              <Route path="perfil" element={<Profile role="produtor" />} />
+              <Route path="areas/:areaId" element={<DetalhesArea />} />
+              <Route path="leituras/nova" element={<NovaLeitura />} />
+              <Route index element={<Navigate to="dashboard" replace />} />
+            </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Router>
+            {/* Rotas Agrônomo */}
+            <Route path="/agronomo" element={<AgronomoLayout />}>
+              <Route path="dashboard" element={<AgronomoDashboard />} />
+              <Route path="perfil" element={<Profile role="agronomo" />} />
+              <Route path="areas/nova" element={<NovaArea />} />
+              <Route path="areas/:areaId/editar" element={<NovaArea />} />
+              <Route path="areas/:areaId" element={<AgronomoDetalhesArea />} />
+              <Route index element={<Navigate to="dashboard" replace />} />
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Router>
+      </PwaInstallProvider>
     </AppProvider>
   );
 }

@@ -1,5 +1,28 @@
 {
+  "headers": [
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json; charset=utf-8" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
+    },
+    {
+      "source": "/service-worker.js",
+      "headers": [
+        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
+    }
+  ],
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/login/:type", "destination": "/index.html" },
+    { "source": "/contato", "destination": "/index.html" },
+    { "source": "/selecionar-tipo", "destination": "/index.html" },
+    { "source": "/produtor/:path*", "destination": "/index.html" },
+    { "source": "/agronomo/:path*", "destination": "/index.html" }
   ]
 }
