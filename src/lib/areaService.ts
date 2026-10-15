@@ -3,11 +3,13 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  limit,
   query,
   serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { Area } from "../types";
@@ -35,5 +37,13 @@ export const listarAreasDoUsuario = async (
 };
 
 export const deletarArea = async (areaId: string) => {
+  const leiturasRef = collection(db, "areas", areaId, "leituras");
+  while (true) {
+    const leituras = await getDocs(query(leiturasRef, limit(200)));
+    if (leituras.empty) break;
+    const batch = writeBatch(db);
+    leituras.docs.forEach((leitura) => batch.delete(leitura.ref));
+    await batch.commit();
+  }
   await deleteDoc(doc(db, "areas", areaId));
 };

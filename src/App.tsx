@@ -62,6 +62,7 @@ export default function App() {
               <Route path="areas/nova" element={<NovaArea />} />
               <Route path="areas/:areaId/editar" element={<NovaArea />} />
               <Route path="areas/:areaId" element={<AgronomoDetalhesArea />} />
+              <Route path="leituras/nova" element={<NovaLeitura />} />
               <Route index element={<Navigate to="dashboard" replace />} />
             </Route>
 

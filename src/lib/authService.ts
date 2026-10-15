@@ -1,11 +1,17 @@
 import {
+  createUserWithEmailAndPassword,
+  deleteUser,
   EmailAuthProvider,
+  inMemoryPersistence,
   reauthenticateWithCredential,
+  setPersistence,
   signOut,
   updatePassword,
+  updateProfile,
   type User,
 } from 'firebase/auth';
-import { auth } from './firebase';
+import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { auth, criarInstanciaFirebaseIsolada } from './firebase';
 import {
   buscarUsuario,
   criarPerfilAgronomoAdministrativamente,
@@ -111,4 +117,77 @@ export const criarContaDeAgronomo = async (nome: string, email: string, password
   }
 
   return result.localId;
+};
+
+export const criarContaDeProdutor = async (nome: string, email: string, password: string) => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error('É necessário estar autenticado como agrônomo para cadastrar um produtor.');
+  }
+
+  const currentProfile = await buscarUsuario(currentUser.uid);
+  if (currentProfile?.tipo !== 'agronomo') {
+    throw new Error('Somente um agrônomo autenticado pode cadastrar produtores.');
+  }
+
+  const normalizedName = nome.trim();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedName || normalizedName.length > 120) {
+    throw new Error('Informe o nome do produtor com até 120 caracteres.');
+  }
+  if (!normalizedEmail || password.length < 6) {
+    throw new Error('Informe um e-mail válido e uma senha com pelo menos 6 caracteres.');
+  }
+
+  const isolated = criarInstanciaFirebaseIsolada();
+  let createdUser: User | null = null;
+  try {
+    await setPersistence(isolated.auth, inMemoryPersistence);
+    const credential = await createUserWithEmailAndPassword(
+      isolated.auth,
+      normalizedEmail,
+      password,
+    );
+    createdUser = credential.user;
+    await updateProfile(createdUser, { displayName: normalizedName });
+    await setDoc(doc(isolated.db, 'usuarios', createdUser.uid), {
+      nome: normalizedName,
+      email: createdUser.email ?? normalizedEmail,
+      tipo: 'produtor',
+      cpf_prompted: false,
+      criado_em: serverTimestamp(),
+    });
+    return createdUser.uid;
+  } catch (error) {
+    if (createdUser) {
+      try {
+        await deleteUser(createdUser);
+      } catch (rollbackError) {
+        throw new Error(
+          `Não foi possível salvar o perfil do produtor e a conta de autenticação não pôde ser removida (UID ${createdUser.uid}). ${error instanceof Error ? error.message : 'Erro desconhecido.'} Falha ao remover a conta: ${rollbackError instanceof Error ? rollbackError.message : 'erro desconhecido.'}`,
+        );
+      }
+    }
+
+    const code = typeof error === 'object'
+      && error !== null
+      && 'code' in error
+      && typeof error.code === 'string'
+      ? error.code
+      : undefined;
+    if (code === 'auth/email-already-in-use') {
+      throw new Error('Este e-mail já possui uma conta.');
+    }
+    if (code === 'auth/weak-password') {
+      throw new Error('A senha deve ter pelo menos 6 caracteres.');
+    }
+    if (createdUser) {
+      throw new Error(
+        `Não foi possível concluir o cadastro do produtor: ${error instanceof Error ? error.message : 'erro desconhecido.'}`,
+      );
+    }
+    throw error;
+  } finally {
+    await isolated.dispose();
+  }
 };

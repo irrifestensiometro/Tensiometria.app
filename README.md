@@ -55,11 +55,19 @@ npm run build
 
 Cada setor agrupa seus proprios tensiometros e recebe um calculo independente de gatilho, lamina e tempo de irrigacao. Os parametros de solo, cultura e sistema de irrigacao sao compartilhados pela area; as leituras e as camadas monitoradas sao avaliadas separadamente dentro de cada setor. Para que a recomendacao seja calculada, cada setor precisa ter ao menos um tensiometro de decisao e seus sensores devem cobrir a profundidade radicular sem lacunas. Os resultados sao apresentados por setor para o produtor e para o agronomo.
 
+Na criacao da area, o campo **Referencia textural do solo** permite registrar uma das classes do triangulo textural da EMBRAPA (muito argilosa, argilosa, media, siltosa ou arenosa). A selecao preenche CC com a media geral da planilha (21% gravimetrica, convertida para 0,252 cm3/cm3 com Ds = 1,2 g/cm3); a planilha nao fornece valores de CC distintos para cada classe. A faixa media de CC e 18–26%, e a de PMP e 8–12% (media 9,5%); PMP e informativo e nao entra no calculo atual. A referencia nao altera os coeficientes A e B, que devem ser obtidos no laudo fisico-hidrico do talhao. As abas de ensaios Planilha 1, Centro do pivo e Banana nao sao aplicadas como referencias texturais.
+
+O passo de solo apresenta um triangulo textural vetorial e responsivo com os eixos de argila, areia e silte como apoio visual para identificar as classes; confirme a classificacao com a analise granulometrica.
+
+No primeiro passo do cadastro, o agronomo informa livremente a cultura e a profundidade radicular. A partir de cinco areas com a mesma combinacao de cultura e profundidade, essa combinacao passa a aparecer entre as cinco mais usadas, ordenadas pela frequencia, como sugestao opcional. As sugestoes usam as areas cadastradas pelo proprio agronomo e se atualizam apos novos cadastros; areas antigas sem cultura registrada nao entram na contagem.
+
+Os rascunhos do cadastro de areas so sao salvos localmente ou na nuvem depois que o passo 1 tiver nome da area, produtor vinculado, cultura e profundidade radicular valida (50–2000 mm).
+
 ## Regras seguras do Firestore
 
-O app usa regras com permissao negada por padrao. Produtores e agronomos podem criar o proprio perfil apos autenticacao por e-mail ou Google, sem aprovacao. Um agronomo autenticado tambem pode criar outra conta de agronomo pelo painel; novos agronomos nao recebem privilegios de administrador. Para preencher a selecao de produtor, um agronomo autenticado pode consultar perfis com `tipo: "produtor"` na colecao `usuarios`. Essa permissao retorna os campos completos desses perfis, incluindo email e localizacao.
+O app usa regras com permissao negada por padrao. Produtores podem criar o proprio perfil apos autenticacao por e-mail ou Google, sem aprovacao. Um agronomo autenticado pode criar contas de produtor e de outro agronomo pelo painel; a criacao de produtor usa uma instancia Firebase isolada para preservar a sessao do agronomo. Novos agronomos nao recebem privilegios de administrador. Para preencher a selecao de produtor, um agronomo autenticado pode consultar perfis com `tipo: "produtor"` na colecao `usuarios`. Essa permissao retorna os campos completos desses perfis, incluindo email e localizacao.
 
-**Importante:** publique `firestore.rules` atualizado no Console do Firestore para permitir cadastro automatico de produtores e agronomos, consulta dos perfis de produtores por agronomos e sincronizacao de rascunhos de areas. A regra exige que a consulta seja filtrada por `tipo == "produtor"`; sem essa publicacao, a lista retornara `permission-denied`. Os rascunhos sao armazenados em `rascunhos_areas`, acessiveis somente pelo agronomo que os criou, e so viram areas visiveis ao produtor quando o cadastro e finalizado.
+**Importante:** publique `firestore.rules` atualizado no Console do Firestore para permitir cadastro automatico de produtores e agronomos, consulta dos perfis de produtores por agronomos, sincronizacao de rascunhos de areas e compartilhamento de leituras. Leituras ficam em `areas/{areaId}/leituras`; apenas o produtor vinculado e o agronomo proprietario podem consulta-las ou registra-las, e cada registro identifica o UID do autor. A exclusao de uma area remove suas leituras em lotes antes de excluir o documento. A consulta de produtores exige o filtro `tipo == "produtor"`; sem as regras publicadas, a lista ou sincronizacao retornara `permission-denied`. Os rascunhos ficam em `rascunhos_areas`, acessiveis somente pelo agronomo que os criou, e so viram areas visiveis ao produtor quando o cadastro e finalizado.
 
 ```powershell
 $env:FIREBASE_PROJECT_ID = "irrifes-tensiometria"
@@ -69,7 +77,7 @@ npm run provision:admin -- agro@adm.com "Agrônomo administrador"
 
 Execute esse comando uma unica vez para criar a conta inicial. O script pede a senha duas vezes sem mostrá-la na tela e exige no minimo 12 caracteres. Use uma senha nova, forte e diferente de qualquer senha compartilhada em mensagens. A credencial de servico deve ficar fora do repositorio; nao a envie ao navegador nem ao Git. O comando usa o Admin SDK localmente, sem Cloud Functions ou plano Blaze.
 
-Depois, qualquer agronomo autenticado pode criar outra conta pela dashboard, informando nome, e-mail e senha inicial. O cadastro de agronomo permanece indisponivel na tela de login e no formulario de contato. Publique as regras atualizadas para permitir a criacao do perfil por um agronomo ja autenticado; o auto-cadastro continua permitido apenas para produtores.
+Depois, qualquer agronomo autenticado pode criar uma conta de produtor ou outra conta de agronomo pela dashboard, informando nome, e-mail e senha inicial. O cadastro de agronomo permanece indisponivel na tela de login e no formulario de contato. Publique as regras atualizadas para permitir a criacao de contas/perfis pelo painel; o auto-cadastro continua permitido apenas para produtores.
 
 ### Gestao local e segura de agronomos
 

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { Activity, Map, Users, Plus, CheckCircle2, UserPlus, X, Clock3, ArrowRight, Trash2, ShieldCheck, LoaderCircle, ShieldOff } from 'lucide-react';
 import { getAreaColor } from '../../lib/areaColors';
-import { criarContaDeAgronomo } from '../../lib/authService';
+import { criarContaDeAgronomo, criarContaDeProdutor } from '../../lib/authService';
 import { DraftMapPreview } from '../../components/map/DraftMapPreview';
 import {
   listAdminAgronomists,
@@ -24,6 +24,7 @@ export default function AgronomoDashboard() {
     draftSyncError,
     produtores,
     currentUser,
+    addProducerOption,
     removeArea,
     removeAreaDraft,
   } = useAppContext();
@@ -36,6 +37,10 @@ export default function AgronomoDashboard() {
   ), 0);
   const [showCreateAgronomist, setShowCreateAgronomist] = useState(false);
   const [newAgronomist, setNewAgronomist] = useState({ nome: '', email: '', password: '' });
+  const [showCreateProducer, setShowCreateProducer] = useState(false);
+  const [newProducer, setNewProducer] = useState({ nome: '', email: '', password: '' });
+  const [producerCreateError, setProducerCreateError] = useState('');
+  const [creatingProducer, setCreatingProducer] = useState(false);
   const [createError, setCreateError] = useState('');
   const [creating, setCreating] = useState(false);
   const [deletingItem, setDeletingItem] = useState<string | null>(null);
@@ -172,6 +177,27 @@ export default function AgronomoDashboard() {
     }
   };
 
+  const handleCreateProducer = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setProducerCreateError('');
+    setCreatingProducer(true);
+    try {
+      const producerUid = await criarContaDeProdutor(
+        newProducer.nome.trim(),
+        newProducer.email.trim(),
+        newProducer.password,
+      );
+      addProducerOption({ id: producerUid, nome: newProducer.nome.trim() });
+      setNewProducer({ nome: '', email: '', password: '' });
+      setShowCreateProducer(false);
+      window.alert('Conta de produtor criada. Agora você já pode vinculá-la a uma área.');
+    } catch (error) {
+      setProducerCreateError(error instanceof Error ? error.message : 'Não foi possível criar a conta do produtor.');
+    } finally {
+      setCreatingProducer(false);
+    }
+  };
+
   return (
     <div className="space-y-7 sm:space-y-9 animate-in fade-in duration-500">
       <section className="flex flex-col gap-5 rounded-3xl border border-emerald-100 bg-gradient-to-br from-white via-white to-emerald-50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-7">
@@ -183,6 +209,14 @@ export default function AgronomoDashboard() {
           <p className="mt-2 text-sm text-slate-600 sm:text-base">Acompanhe suas áreas e o monitoramento agrícola.</p>
         </div>
         <div className="flex w-full shrink-0 flex-col gap-3 sm:w-auto">
+          <button
+            type="button"
+            onClick={() => { setProducerCreateError(''); setShowCreateProducer(true); }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#356b46] px-5 py-3 font-bold text-white shadow-sm transition-colors hover:bg-[#2a5538]"
+          >
+            <UserPlus size={18} />
+            <span>Novo produtor</span>
+          </button>
           <button
             onClick={() => { setCreateError(''); setShowCreateAgronomist(true); }}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
@@ -390,12 +424,23 @@ export default function AgronomoDashboard() {
                       <span>Z: <span className="font-bold text-slate-700">{area.planta.prof_raiz_mm}mm</span></span>
                       <span>Tensiômetros: <span className="font-bold text-slate-700">{area.tensiometros.length}</span></span>
                     </div>
-                    <button
-                      onClick={() => navigate('/agronomo/areas/' + area.id)}
-                      className="w-full py-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl transition-colors"
-                    >
-                      Ver Monitoramento
-                    </button>
+                    <div className="mt-auto grid grid-cols-1 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => navigate('/agronomo/leituras/nova', { state: { areaId: area.id } })}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#356b46] py-3 font-bold text-white transition-colors hover:bg-[#2a5538]"
+                      >
+                        <Activity size={16} />
+                        Nova leitura
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => navigate('/agronomo/areas/' + area.id)}
+                        className="w-full rounded-xl border border-slate-200 bg-white py-3 font-bold text-slate-700 transition-colors hover:bg-slate-50"
+                      >
+                        Ver monitoramento
+                      </button>
+                    </div>
                   </div>
                 </li>
               );
@@ -597,6 +642,7 @@ export default function AgronomoDashboard() {
                   {createError}
                 </div>
               )}
+
               <label className="block text-sm font-semibold text-slate-700">
                 Nome completo
                 <input
@@ -637,6 +683,80 @@ export default function AgronomoDashboard() {
                 className="w-full rounded-xl bg-[#356b46] px-4 py-3 font-bold text-white transition-colors hover:bg-[#2a5538] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {creating ? 'Criando conta...' : 'Criar conta de agrônomo'}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {showCreateProducer && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-producer-title"
+            className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+              <div>
+                <h2 id="create-producer-title" className="text-lg font-bold text-slate-900">Cadastrar produtor</h2>
+                <p className="mt-1 text-sm text-slate-500">Crie o acesso e depois vincule o produtor a uma área.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateProducer(false)}
+                aria-label="Fechar"
+                className="rounded-full p-2 text-slate-500 transition-colors hover:bg-slate-100"
+              >
+                <X size={19} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateProducer} className="space-y-4 p-5 sm:p-6">
+              {producerCreateError && (
+                <div role="alert" className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+                  {producerCreateError}
+                </div>
+              )}
+              <label className="block text-sm font-semibold text-slate-700">
+                Nome completo
+                <input
+                  required
+                  maxLength={120}
+                  value={newProducer.nome}
+                  onChange={(event) => setNewProducer({ ...newProducer, nome: event.target.value })}
+                  autoComplete="name"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                E-mail
+                <input
+                  required
+                  type="email"
+                  value={newProducer.email}
+                  onChange={(event) => setNewProducer({ ...newProducer, email: event.target.value })}
+                  autoComplete="email"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <label className="block text-sm font-semibold text-slate-700">
+                Senha inicial
+                <input
+                  required
+                  type="password"
+                  minLength={6}
+                  value={newProducer.password}
+                  onChange={(event) => setNewProducer({ ...newProducer, password: event.target.value })}
+                  autoComplete="new-password"
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={creatingProducer}
+                className="w-full rounded-xl bg-[#356b46] px-4 py-3 font-bold text-white transition-colors hover:bg-[#2a5538] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {creatingProducer ? 'Criando conta...' : 'Criar conta de produtor'}
               </button>
             </form>
           </section>

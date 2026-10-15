@@ -98,6 +98,7 @@ service cloud.firestore {
           'agronomo_id',
           'produtor_id',
           'nome',
+          'cultura',
           'poligono',
           'solo',
           'planta',
@@ -109,7 +110,22 @@ service cloud.firestore {
         && data.agronomo_id is string
         && data.produtor_id is string
         && data.nome is string
+        && (
+          !('cultura' in data)
+          || (data.cultura is string && data.cultura.size() > 0 && data.cultura.size() <= 100)
+        )
         && data.solo is map
+        && data.solo.keys().hasAll(['coef_a', 'coef_b', 'umidade_cc'])
+        && (
+          !('textura_referencia' in data.solo)
+          || data.solo.textura_referencia in [
+            'muito-argilosa',
+            'argilosa',
+            'media',
+            'siltosa',
+            'arenosa'
+          ]
+        )
         && data.planta is map
         && data.irrigacao is map
         && data.tensiometros is list
@@ -118,6 +134,53 @@ service cloud.firestore {
           !('poligono' in data)
           || data.poligono is list
         );
+    }
+
+    function areaPath(areaId) {
+      return /databases/$(database)/documents/areas/$(areaId);
+    }
+
+    function canAccessArea(areaId) {
+      return signedIn()
+        && exists(areaPath(areaId))
+        && (
+          isAdmin()
+          || (
+            hasRole('agronomo')
+            && get(areaPath(areaId)).data.agronomo_id == uid()
+          )
+          || (
+            hasRole('produtor')
+            && get(areaPath(areaId)).data.produtor_id == uid()
+          )
+        );
+    }
+
+    function validLeitura(data, areaId, leituraId) {
+      return data.keys().hasAll([
+          'id',
+          'area_id',
+          'data',
+          'valores',
+          'registrado_por_uid',
+          'criado_em'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'area_id',
+          'data',
+          'valores',
+          'registrado_por_uid',
+          'criado_em'
+        ])
+        && data.id == leituraId
+        && data.area_id == areaId
+        && data.data is string
+        && data.valores is list
+        && data.valores.size() > 0
+        && data.valores.size() <= 100
+        && data.registrado_por_uid == uid()
+        && data.criado_em == request.time;
     }
 
     match /usuarios/{userId} {
@@ -314,7 +377,13 @@ service cloud.firestore {
         && resource.data.agronomo_id == uid();
 
       match /leituras/{leituraId} {
-        allow read, write: if false;
+        allow get, list: if canAccessArea(areaId);
+        allow create: if canAccessArea(areaId)
+          && validLeitura(request.resource.data, areaId, leituraId);
+        allow update: if false;
+        allow delete: if hasRole('agronomo')
+          && exists(areaPath(areaId))
+          && get(areaPath(areaId)).data.agronomo_id == uid();
       }
     }
 
@@ -331,7 +400,6 @@ service cloud.firestore {
           'step',
           'formData',
           'polygonPoints',
-          'culturaSugerida',
           'setores',
           'updated_at'
         ])
@@ -351,7 +419,6 @@ service cloud.firestore {
         && request.resource.data.step <= 6
         && request.resource.data.formData is map
         && request.resource.data.polygonPoints is list
-        && request.resource.data.culturaSugerida is string
         && request.resource.data.setores is list
         && request.resource.data.updated_at is int
         && (
@@ -369,7 +436,6 @@ service cloud.firestore {
           'step',
           'formData',
           'polygonPoints',
-          'culturaSugerida',
           'setores',
           'updated_at'
         ])
@@ -398,7 +464,6 @@ service cloud.firestore {
         && request.resource.data.step <= 6
         && request.resource.data.formData is map
         && request.resource.data.polygonPoints is list
-        && request.resource.data.culturaSugerida is string
         && request.resource.data.setores is list
         && request.resource.data.updated_at is int
         && (

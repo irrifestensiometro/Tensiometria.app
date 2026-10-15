@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { deleteApp, initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
 import {
@@ -42,6 +42,15 @@ const app = initializeApp(firebaseConfig);
 try { getAnalytics(app); } catch { /* analytics bloqueado */ }
 export const db = getFirestore(app);
 export const auth = getAuth(app);
+export const criarInstanciaFirebaseIsolada = () => {
+  const secondaryApp = initializeApp(firebaseConfig, `isolated-${crypto.randomUUID()}`);
+  return {
+    app: secondaryApp,
+    auth: getAuth(secondaryApp),
+    db: getFirestore(secondaryApp),
+    dispose: () => deleteApp(secondaryApp),
+  };
+};
 export const googleProvider = new GoogleAuthProvider();
 export const signInWithGooglePopup = () => signInWithPopup(auth, googleProvider);
 export const loginWithEmail = (email: string, password: string) =>

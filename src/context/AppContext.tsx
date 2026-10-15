@@ -12,6 +12,7 @@ import {
 } from '../lib/usuarioService';
 import { normalizarCpf, validarCpf } from '../lib/cpf';
 import { criarArea, atualizarArea as persistirArea, listarAreasDoUsuario, deletarArea } from '../lib/areaService';
+import { listarLeiturasDasAreas, registrarLeitura } from '../lib/leituraService';
 import {
   listarRascunhosLocais,
   listarRascunhosRemotos,
@@ -33,10 +34,12 @@ interface AppState {
   userRole: 'agronomo' | 'produtor' | null;
   loading: boolean;
   loadError: string | null;
+  leituraSyncError: string | null;
   draftSyncError: string | null;
   login: (email: string, password: string, role: 'agronomo' | 'produtor') => Promise<boolean>;
   logout: () => Promise<void>;
   refreshCurrentUser: () => Promise<void>;
+  addProducerOption: (producer: ProdutorOpcao) => void;
   trocarSenhaInicial: (novaSenha: string) => Promise<void>;
   concluirCadastroCpf: (cpf?: string) => Promise<void>;
   updateAccountProfile: (nome: string, cpf?: string) => Promise<void>;
@@ -46,7 +49,7 @@ interface AppState {
   saveAreaDraftLocally: (draft: AreaDraft) => void;
   saveAreaDraft: (draft: AreaDraft) => Promise<void>;
   removeAreaDraft: (draftId: string) => Promise<void>;
-  addLeitura: (leitura: Leitura) => void;
+  addLeitura: (leitura: Omit<Leitura, 'registrado_por_uid'>) => Promise<void>;
   updateProdutor: (produtor: Produtor) => void;
 }
 
@@ -67,6 +70,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [userRole, setUserRole] = useState<'agronomo' | 'produtor' | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [leituraSyncError, setLeituraSyncError] = useState<string | null>(null);
   const [draftSyncError, setDraftSyncError] = useState<string | null>(null);
   const loadVersion = useRef(0);
   const draftSaveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -131,6 +135,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setDraftSyncError(null);
       }
       if (version !== loadVersion.current) return;
+      let userReadings: Leitura[] = [];
+      let readingsError: string | null = null;
+      try {
+        userReadings = await listarLeiturasDasAreas(userAreas);
+      } catch (error) {
+        readingsError = `Não foi possível sincronizar as leituras: ${getErrorMessage(error)}. Verifique se as regras atualizadas do Firestore foram publicadas.`;
+      }
+      if (version !== loadVersion.current) return;
       setCurrentUser({
         id: firebaseUser.uid,
         nome: userData.nome,
@@ -154,6 +166,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           : producerOptions,
       );
       setAreas(userAreas);
+      setLeituras(userReadings);
+      setLeituraSyncError(readingsError);
     } catch (error) {
       if (version !== loadVersion.current) return;
       setCurrentUser(null);
@@ -163,6 +177,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       setShouldAskCpf(false);
       setProdutores([]);
       setAreas([]);
+      setLeituras([]);
+      setLeituraSyncError(null);
       setAreaDrafts([]);
       setLoadError(`Não foi possível carregar os dados da conta: ${getErrorMessage(error)}`);
     } finally {
@@ -183,6 +199,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setShouldAskCpf(false);
         setProdutores([]);
         setAreas([]);
+        setLeituras([]);
+        setLeituraSyncError(null);
         setAreaDrafts([]);
         setLoadError(null);
         setDraftSyncError(null);
@@ -202,6 +220,17 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (auth.currentUser) {
       await loadUserData(auth.currentUser);
     }
+  };
+
+  const addProducerOption = (producer: ProdutorOpcao) => {
+    if (userRole !== 'agronomo') {
+      throw new Error('Somente um agrônomo pode atualizar a lista de produtores.');
+    }
+    setProdutores((current) => (
+      current.some((item) => item.id === producer.id)
+        ? current
+        : [...current, producer]
+    ));
   };
 
   const trocarSenhaInicial = async (novaSenha: string) => {
@@ -326,8 +355,24 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setDraftSyncError(null);
   }, [currentUser]);
 
-  const addLeitura = (leitura: Leitura) => {
-    setLeituras((current) => [...current, leitura]);
+  const addLeitura = async (leitura: Omit<Leitura, 'registrado_por_uid'>) => {
+    if (!currentUser || !userRole) {
+      throw new Error('É necessário estar autenticado para registrar uma leitura.');
+    }
+    const area = areas.find((item) => item.id === leitura.area_id);
+    if (!area) {
+      throw new Error('A área desta leitura não está disponível para sua conta.');
+    }
+    if (
+      (userRole === 'agronomo' && area.agronomo_id !== currentUser.id)
+      || (userRole === 'produtor' && area.produtor_id !== currentUser.id)
+    ) {
+      throw new Error('Você não tem permissão para registrar leituras nesta área.');
+    }
+    const leituraComAutor = { ...leitura, registrado_por_uid: currentUser.id };
+    await registrarLeitura(leituraComAutor);
+    setLeituras((current) => [...current, leituraComAutor]);
+    setLeituraSyncError(null);
   };
 
   const updateProdutor = (produtorAtualizado: Produtor) => {
@@ -352,10 +397,12 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       userRole,
       loading,
       loadError,
+      leituraSyncError,
       draftSyncError,
       login,
       logout,
       refreshCurrentUser,
+      addProducerOption,
       trocarSenhaInicial,
       concluirCadastroCpf,
       updateAccountProfile,

@@ -37,11 +37,13 @@ export interface Area {
   agronomo_id: string;
   produtor_id: string;
   nome: string;
+  cultura?: string;
   poligono?: { lat: number; lng: number }[];
   solo: {
     coef_a: number;
     coef_b: number;
     umidade_cc: number; // Umidade na Capacidade de Campo
+    textura_referencia?: string;
   };
   planta: {
     prof_raiz_mm: number; // Z (Profundidade da raiz em mm)
@@ -65,13 +67,15 @@ export interface AreaDraft {
     coef_a: string;
     coef_b: string;
     umidade_cc: string;
+    textura_referencia?: string;
+    cultura: string;
     prof_raiz_mm: string;
     eficiencia_ea: string;
     vazao_ip: string;
     pam: string;
   };
   polygonPoints: [number, number][];
-  culturaSugerida: string;
+  culturaSugerida?: string;
   setores: {
     id: string;
     nome: string;
@@ -97,4 +101,5 @@ export interface Leitura {
   area_id: string;
   data: string; // ISO string
   valores: LeituraValor[];
+  registrado_por_uid: string;
 }

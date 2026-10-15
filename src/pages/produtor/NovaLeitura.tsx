@@ -8,7 +8,8 @@ import { LeituraValor } from '../../types';
 export default function NovaLeitura() {
   const { state } = useLocation();
   const navigate = useNavigate();
-  const { areas, addLeitura, leituras } = useAppContext();
+  const { areas, addLeitura, leituras, userRole } = useAppContext();
+  const dashboardPath = userRole === 'agronomo' ? '/agronomo/dashboard' : '/produtor/dashboard';
   
   const areaId = state?.areaId;
   const area = areas.find(a => a.id === areaId);
@@ -19,12 +20,10 @@ export default function NovaLeitura() {
   const [valores, setValores] = useState<{ [tensiometroId: string]: string }>({});
   const [resultado, setResultado] = useState<ResultadoIrrigacao | null>(null);
   const [erroCalculo, setErroCalculo] = useState<string[]>([]);
-
-  if (!area) {
-    return <div className="p-4 text-center">Área não encontrada.</div>;
-  }
+  const [salvando, setSalvando] = useState(false);
 
   const setores = useMemo(() => {
+    if (!area) return [];
     const grupos = new Map<string, typeof area.tensiometros>();
     area.tensiometros.forEach(t => {
       const setor = t.setor || 'Tensiômetros';
@@ -32,7 +31,11 @@ export default function NovaLeitura() {
       grupos.get(setor)!.push(t);
     });
     return Array.from(grupos.entries());
-  }, [area.tensiometros]);
+  }, [area]);
+
+  if (!area) {
+    return <div className="p-4 text-center">Área não encontrada.</div>;
+  }
 
   let resultadoHoje: ResultadoIrrigacao | null = null;
   if (leituraHoje) {
@@ -43,7 +46,7 @@ export default function NovaLeitura() {
     }
   }
 
-  const handleCalcular = () => {
+  const handleCalcular = async () => {
     const leiturasFormatadas: LeituraValor[] = area.tensiometros.map(t => ({
       tensiometro_id: t.id,
       leitura_kpa: parseFloat(valores[t.id] || '0')
@@ -51,7 +54,8 @@ export default function NovaLeitura() {
 
     try {
       const res = calcularIrrigacao(area, leiturasFormatadas);
-      addLeitura({
+      setSalvando(true);
+      await addLeitura({
         id: Math.random().toString(36).slice(2, 11),
         area_id: area.id,
         data: new Date().toISOString(),
@@ -60,7 +64,13 @@ export default function NovaLeitura() {
       setErroCalculo([]);
       setResultado(res);
     } catch (erro) {
-      setErroCalculo(erro instanceof ErroCalculoIrrigacao ? erro.problemas : ['Não foi possível calcular a recomendação.']);
+      setErroCalculo(
+        erro instanceof ErroCalculoIrrigacao
+          ? erro.problemas
+          : [`Não foi possível salvar a leitura: ${erro instanceof Error ? erro.message : 'erro desconhecido.'}`],
+      );
+    } finally {
+      setSalvando(false);
     }
   };
 
@@ -99,7 +109,7 @@ export default function NovaLeitura() {
         </div>
 
         <button 
-          onClick={() => navigate('/produtor/dashboard')}
+          onClick={() => navigate(dashboardPath)}
           className="w-full max-w-sm py-4 rounded-xl text-lg font-bold bg-white text-slate-700 shadow-sm border border-slate-200 hover:bg-slate-50 transition-colors"
         >
           Voltar para o Início
@@ -164,7 +174,7 @@ export default function NovaLeitura() {
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
         <div className="mb-6">
-          <h2 className="text-xl font-bold text-slate-800">Nova Leitura</h2>
+          <h2 className="text-xl font-bold text-slate-800">Registrar leitura</h2>
           <p className="text-slate-500 text-sm mt-1">Insira os valores atuais dos tensiômetros (kPa)</p>
         </div>
         {erroCalculo.length > 0 && (
@@ -206,10 +216,10 @@ export default function NovaLeitura() {
 
         <button 
           onClick={handleCalcular}
-          disabled={area.tensiometros.some(t => !valores[t.id])}
+          disabled={salvando || area.tensiometros.some(t => !valores[t.id])}
           className="w-full bg-[#b57d59] hover:bg-[#99694b] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white py-5 rounded-xl font-bold text-xl transition-all"
         >
-          Calcular Recomendação
+          {salvando ? 'Salvando leitura...' : 'Calcular recomendação'}
         </button>
       </div>
     </div>

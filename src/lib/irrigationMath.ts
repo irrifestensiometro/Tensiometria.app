@@ -60,7 +60,7 @@ export function validarParametrosIrrigacao(area: Area, leituras?: LeituraValor[]
   const { eficiencia_ea: ea, vazao_ip: ip, pam } = area.irrigacao;
 
   if (!numeroFinito(a) || a <= 0) problemas.push('O coeficiente A deve ser maior que zero.');
-  if (!numeroFinito(b) || b <= 0) problemas.push('O coeficiente B deve ser maior que zero.');
+  if (!numeroFinito(b) || b === 0) problemas.push('O coeficiente B deve ser diferente de zero.');
   if (!numeroFinito(cc) || cc <= 0 || cc > 1) problemas.push('A umidade na capacidade de campo deve estar entre 0 e 1.');
   if (!numeroFinito(area.planta.prof_raiz_mm) || area.planta.prof_raiz_mm <= 0) problemas.push('A profundidade radicular deve ser maior que zero.');
   if (!numeroFinito(ea) || ea <= 0 || ea > 1) problemas.push('A eficiência de aplicação deve estar entre 0 e 1.');
@@ -124,7 +124,7 @@ export function validarParametrosIrrigacao(area: Area, leituras?: LeituraValor[]
 
 function calcularUmidadeAtual(area: Area, tensaoKpa: number) {
   const psi = Math.max(tensaoKpa, 0.1);
-  return Math.max(0, area.solo.coef_a * Math.pow(psi, -area.solo.coef_b));
+  return Math.max(0, area.solo.coef_a * Math.pow(psi, -Math.abs(area.solo.coef_b)));
 }
 
 function formatarTempo(horasDecimais: number): string {

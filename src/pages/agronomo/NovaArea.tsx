@@ -1,32 +1,27 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
-import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles, Cloud, CloudOff, Undo2 } from 'lucide-react';
+import { ArrowLeft, Check, Plus, Trash2, MapPin, Info, Sparkles, Cloud, CloudOff, Undo2, Search } from 'lucide-react';
 import { Area, AreaDraft } from '../../types';
 import { validarParametrosIrrigacao } from '../../lib/irrigationMath';
 import { formatarNumeroLocalizado, parseNumeroLocalizado } from '../../lib/numberFormat';
+import { listarCulturasMaisUsadas } from '../../lib/cultureRecommendations';
+import { temDadosMinimosParaRascunho } from '../../lib/areaDraftValidation';
+import {
+  converterUmidadeGravimetricaParaVolumetrica,
+  REFERENCIAS_TEXTURAIS,
+  UMIDADE_MEDIA_SOLO,
+} from '../../lib/soilReferences';
 import { MapContainer, Polygon, Marker, Popup } from 'react-leaflet';
 import { initLeafletIcons } from '../../lib/leaflet-setup';
 import { PolygonDrawer } from '../../components/map/MapUtils';
 import { HybridSatelliteTiles } from '../../components/map/HybridSatelliteTiles';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { FieldLabel } from '../../components/ui/FieldLabel';
+import { SoilTextureTriangle } from '../../components/SoilTextureTriangle';
 import { formatarCpf } from '../../lib/cpf';
 
 initLeafletIcons();
-
-const SUGESTOES_CULTURA = [
-  { nome: 'Milho', prof_raiz_mm: 600 },
-  { nome: 'Soja', prof_raiz_mm: 400 },
-  { nome: 'Feijão', prof_raiz_mm: 300 },
-  { nome: 'Café', prof_raiz_mm: 800 },
-  { nome: 'Cana-de-açúcar', prof_raiz_mm: 1000 },
-  { nome: 'Algodão', prof_raiz_mm: 700 },
-  { nome: 'Arroz', prof_raiz_mm: 300 },
-  { nome: 'Trigo', prof_raiz_mm: 400 },
-  { nome: 'Pastagem', prof_raiz_mm: 500 },
-  { nome: 'Hortaliças', prof_raiz_mm: 200 },
-];
 
 export default function NovaArea() {
   const navigate = useNavigate();
@@ -46,6 +41,8 @@ export default function NovaArea() {
     coef_a: '',
     coef_b: '',
     umidade_cc: '',
+    textura_referencia: '',
+    cultura: '',
     prof_raiz_mm: '',
     eficiencia_ea: '',
     vazao_ip: '',
@@ -53,15 +50,44 @@ export default function NovaArea() {
   });
 
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
-  const [culturaSugerida, setCulturaSugerida] = useState('');
   const [formError, setFormError] = useState<string[]>([]);
   const [edicaoCarregada, setEdicaoCarregada] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
-  const [draftSaveStatus, setDraftSaveStatus] = useState<'saving' | 'saved' | 'local' | 'error'>('saving');
+  const [draftSaveStatus, setDraftSaveStatus] = useState<'pending' | 'saving' | 'saved' | 'local' | 'error'>('pending');
   const [draftSaveError, setDraftSaveError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [produtorSearch, setProdutorSearch] = useState('');
+  const [produtorSelectOpen, setProdutorSelectOpen] = useState(false);
+  const [produtorActiveIndex, setProdutorActiveIndex] = useState(-1);
+  const produtorSelectRef = useRef<HTMLDivElement>(null);
 
   const produtorSelecionado = produtores.find((produtor) => produtor.id === formData.produtor_id);
+  const produtorLegado = areaEmEdicao && !produtorSelecionado
+    ? { id: areaEmEdicao.produtor_id, nome: `Produtor já vinculado (${areaEmEdicao.produtor_id})` }
+    : null;
+  const opcoesProdutores = produtorLegado ? [...produtores, produtorLegado] : produtores;
+  const produtorSearchNormalizado = produtorSearch
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR')
+    .trim();
+  const produtorSearchNumeros = produtorSearch.replace(/\D/g, '');
+  const produtoresFiltrados = opcoesProdutores.filter((produtor) => {
+    const nomeNormalizado = produtor.nome
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('pt-BR');
+    const cpfNumeros = produtor.cpf?.replace(/\D/g, '') || '';
+    return nomeNormalizado.includes(produtorSearchNormalizado)
+      || produtor.id.toLocaleLowerCase('pt-BR').includes(produtorSearchNormalizado)
+      || Boolean(produtorSearchNumeros && cpfNumeros.includes(produtorSearchNumeros));
+  });
+  const produtorSelecionadoLabel = produtorSelecionado
+    ? produtorSelecionado.cpf
+      ? `${produtorSelecionado.nome} — CPF ${formatarCpf(produtorSelecionado.cpf)}`
+      : produtorSelecionado.nome
+    : produtorLegado?.nome || '';
+  const recomendacoesCultura = listarCulturasMaisUsadas(areas);
   const localizacaoProdutor = produtorSelecionado?.localizacao_sede
     ? [produtorSelecionado.localizacao_sede.lat, produtorSelecionado.localizacao_sede.lng] as [number, number]
     : null;
@@ -74,6 +100,17 @@ export default function NovaArea() {
   const mapCenter: [number, number] = centroAreaExistente
     || localizacaoProdutor
     || [-20.3155, -40.3128];
+
+  useEffect(() => {
+    const fecharAoClicarFora = (event: PointerEvent) => {
+      if (!produtorSelectRef.current?.contains(event.target as Node)) {
+        setProdutorSelectOpen(false);
+        setProdutorSearch('');
+      }
+    };
+    document.addEventListener('pointerdown', fecharAoClicarFora);
+    return () => document.removeEventListener('pointerdown', fecharAoClicarFora);
+  }, []);
 
   type SetorForm = {
     id: string;
@@ -112,8 +149,10 @@ export default function NovaArea() {
       nome: areaEmEdicao.nome,
       produtor_id: areaEmEdicao.produtor_id,
       coef_a: formatarNumeroLocalizado(String(areaEmEdicao.solo.coef_a)),
-      coef_b: formatarNumeroLocalizado(String(areaEmEdicao.solo.coef_b)),
+      coef_b: formatarNumeroLocalizado(String(-Math.abs(areaEmEdicao.solo.coef_b))),
       umidade_cc: formatarNumeroLocalizado(String(areaEmEdicao.solo.umidade_cc)),
+      textura_referencia: areaEmEdicao.solo.textura_referencia || '',
+      cultura: areaEmEdicao.cultura || '',
       prof_raiz_mm: formatarNumeroLocalizado(String(areaEmEdicao.planta.prof_raiz_mm)),
       eficiencia_ea: formatarNumeroLocalizado(String(areaEmEdicao.irrigacao.eficiencia_ea)),
       vazao_ip: formatarNumeroLocalizado(String(areaEmEdicao.irrigacao.vazao_ip)),
@@ -142,9 +181,16 @@ export default function NovaArea() {
     const savedDraft = areaDrafts.find((draft) => draft.id === draftId);
     if (savedDraft) {
       setStep(savedDraft.step);
-      setFormData(savedDraft.formData);
+      const coefBDoRascunho = parseNumeroLocalizado(savedDraft.formData.coef_b);
+      setFormData({
+        ...savedDraft.formData,
+        textura_referencia: savedDraft.formData.textura_referencia ?? '',
+        cultura: savedDraft.formData.cultura ?? '',
+        coef_b: Number.isFinite(coefBDoRascunho) && coefBDoRascunho > 0
+          ? formatarNumeroLocalizado(String(-coefBDoRascunho))
+          : savedDraft.formData.coef_b,
+      });
       setPolygonPoints(savedDraft.polygonPoints);
-      setCulturaSugerida(savedDraft.culturaSugerida);
       setSetores(savedDraft.setores);
     } else if (searchParams.has('rascunho')) {
       setDraftSaveError('Este rascunho não foi encontrado na nuvem nem neste dispositivo. Você pode continuar criando a área.');
@@ -160,6 +206,12 @@ export default function NovaArea() {
 
   useEffect(() => {
     if (!draftReady || !currentUser) return;
+    if (!temDadosMinimosParaRascunho(formData)) {
+      setDraftSaveStatus('pending');
+      setDraftSaveError('');
+      return;
+    }
+
     const timeout = window.setTimeout(() => {
       setDraftSaveStatus('saving');
       setDraftSaveError('');
@@ -179,6 +231,7 @@ export default function NovaArea() {
     return () => {
       window.clearTimeout(timeout);
       if (draftCompleted.current) return;
+      if (!temDadosMinimosParaRascunho(formData)) return;
       try {
         saveAreaDraftLocally(criarRascunhoFormulario());
       } catch (error) {
@@ -188,16 +241,17 @@ export default function NovaArea() {
         );
       }
     };
-  }, [draftReady, currentUser, draftId, areaId, step, formData, polygonPoints, culturaSugerida, setores, saveAreaDraft, saveAreaDraftLocally]);
+  }, [draftReady, currentUser, draftId, areaId, step, formData, polygonPoints, setores, saveAreaDraft, saveAreaDraftLocally]);
 
   useEffect(() => {
     if (!draftReady || !currentUser) return;
     const saveBeforeUnload = () => {
+      if (!temDadosMinimosParaRascunho(formData)) return;
       saveAreaDraftLocally(criarRascunhoFormulario());
     };
     window.addEventListener('beforeunload', saveBeforeUnload);
     return () => window.removeEventListener('beforeunload', saveBeforeUnload);
-  }, [draftReady, currentUser, draftId, areaId, step, formData, polygonPoints, culturaSugerida, setores, saveAreaDraftLocally]);
+  }, [draftReady, currentUser, draftId, areaId, step, formData, polygonPoints, setores, saveAreaDraftLocally]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormError([]);
@@ -214,6 +268,7 @@ export default function NovaArea() {
     agronomo_id: areaEmEdicao?.agronomo_id || currentUser!.id,
     produtor_id: formData.produtor_id,
     nome: formData.nome,
+    ...(formData.cultura.trim() ? { cultura: formData.cultura.trim() } : {}),
     ...(polygonPoints.length >= 3
       ? { poligono: polygonPoints.map(([lat, lng]) => ({ lat, lng })) }
       : {}),
@@ -221,6 +276,9 @@ export default function NovaArea() {
       coef_a: parseNumeroLocalizado(formData.coef_a),
       coef_b: parseNumeroLocalizado(formData.coef_b),
       umidade_cc: parseNumeroLocalizado(formData.umidade_cc),
+      ...(formData.textura_referencia
+        ? { textura_referencia: formData.textura_referencia }
+        : {}),
     },
     planta: {
       prof_raiz_mm: parseNumeroLocalizado(formData.prof_raiz_mm),
@@ -249,18 +307,27 @@ export default function NovaArea() {
     step,
     formData,
     polygonPoints,
-    culturaSugerida,
     setores,
     updated_at: Date.now(),
   });
 
+  const validarDadosIniciais = () => {
+    const profundidade = parseNumeroLocalizado(formData.prof_raiz_mm);
+    return [
+      ...(!formData.nome.trim() ? ['Informe o nome da área.'] : []),
+      ...(!formData.produtor_id ? ['Selecione o produtor vinculado.'] : []),
+      ...(!formData.cultura.trim() ? ['Informe o nome da cultura.'] : []),
+      ...(!formData.prof_raiz_mm.trim()
+        || !Number.isFinite(profundidade)
+        || profundidade < 50
+        || profundidade > 2000
+        ? ['Informe uma profundidade radicular entre 50 e 2000 mm.']
+        : []),
+    ];
+  };
+
   const validarEtapaAtual = () => {
-    if (step === 1) {
-      return [
-        ...(!formData.nome.trim() ? ['Informe o nome da área.'] : []),
-        ...(!formData.produtor_id ? ['Selecione o produtor vinculado.'] : []),
-      ];
-    }
+    if (step === 1) return validarDadosIniciais();
 
     return [];
   };
@@ -276,9 +343,8 @@ export default function NovaArea() {
       const problems: string[] = [];
       const values = [
         ['Coeficiente A', formData.coef_a, 0.001, 1.5],
-        ['Coeficiente B', formData.coef_b, 0.001, 2],
+        ['Coeficiente B (negativo)', formData.coef_b, -2, -0.001],
         ['Umidade na capacidade de campo', formData.umidade_cc, 0.01, 1],
-        ['Profundidade radicular', formData.prof_raiz_mm, 50, 2000],
       ] as const;
 
       for (const [label, rawValue, minimum, maximum] of values) {
@@ -399,7 +465,9 @@ export default function NovaArea() {
   };
 
   const handleFinish = async () => {
-    const problemasEtapa = validarEtapaAtual();
+    const problemasEtapa = [
+      ...new Set([...validarDadosIniciais(), ...validarEtapaAtual()]),
+    ];
     setFormError(problemasEtapa);
     if (problemasEtapa.length > 0) {
       return;
@@ -434,35 +502,45 @@ export default function NovaArea() {
     }
   };
 
-  const aplicarCultura = (nome: string) => {
-    const cult = SUGESTOES_CULTURA.find(c => c.nome === nome);
-    if (cult) {
-      setFormData(prev => ({ ...prev, prof_raiz_mm: String(cult.prof_raiz_mm) }));
-      setCulturaSugerida(nome);
+  const aplicarReferenciaSolo = (id: string) => {
+    const referencia = REFERENCIAS_TEXTURAIS.find(item => item.id === id);
+    if (!referencia) {
+      if (!id) setFormData(prev => ({ ...prev, textura_referencia: '' }));
+      return;
     }
+
+    setFormData(prev => ({
+      ...prev,
+      textura_referencia: referencia.id,
+      umidade_cc: formatarNumeroLocalizado(String(
+        converterUmidadeGravimetricaParaVolumetrica(UMIDADE_MEDIA_SOLO.cc),
+      )),
+    }));
   };
 
-  const inputClass = "w-full p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none";
+  const inputClass = "w-full min-w-0 p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none";
+  const selectClass = `${inputClass} bg-white`;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center space-x-4 mb-8">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 rounded-full hover:bg-slate-200 transition-colors">
+    <div className="w-full max-w-4xl mx-auto space-y-4 sm:space-y-6 px-1 sm:px-0">
+      <div className="mb-6 flex flex-wrap items-start gap-3 sm:mb-8 sm:flex-nowrap sm:items-center sm:gap-4">
+        <button onClick={() => navigate(-1)} className="shrink-0 rounded-full p-2 -ml-2 hover:bg-slate-200 transition-colors">
           <ArrowLeft size={24} className="text-slate-700" />
         </button>
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">{areaEmEdicao ? 'Revisar Parâmetros da Área' : 'Cadastrar Nova Área'}</h1>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-2xl font-bold leading-tight text-slate-800 sm:text-3xl">{areaEmEdicao ? 'Revisar Parâmetros da Área' : 'Cadastrar Nova Área'}</h1>
           <p className="text-slate-500">Configuração dos parâmetros de irrigação e mapeamento</p>
         </div>
         {draftReady && (
-          <div className={`ml-auto flex items-center gap-2 text-xs font-semibold ${
+          <div className={`flex w-full items-center gap-2 text-xs font-semibold sm:ml-auto sm:w-auto ${
             draftSaveStatus === 'saved' ? 'text-green-700' : draftSaveStatus === 'saving' ? 'text-slate-500' : 'text-amber-800'
           }`}>
             {draftSaveStatus === 'error' ? <CloudOff size={16} /> : <Cloud size={16} />}
             <span>
               {draftSaveStatus === 'saved' ? 'Rascunho salvo' :
-                draftSaveStatus === 'saving' ? 'Salvando rascunho…' :
-                  draftSaveStatus === 'local' ? 'Salvo neste dispositivo' : 'Falha ao salvar rascunho'}
+              draftSaveStatus === 'saving' ? 'Salvando rascunho…' :
+                  draftSaveStatus === 'local' ? 'Salvo neste dispositivo' :
+                    draftSaveStatus === 'pending' ? 'Preencha os dados do passo 1 para salvar' : 'Falha ao salvar rascunho'}
             </span>
           </div>
         )}
@@ -477,16 +555,19 @@ export default function NovaArea() {
       )}
 
       {/* Progress Bar */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-8 overflow-x-auto">
-        <div className="flex items-center justify-between mb-2 min-w-[500px]">
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:mb-8 sm:p-4">
+        <div className="mb-2 flex w-full items-center">
           {Array.from({ length: totalSteps }).map((_, i) => (
-            <div key={i} className="flex-1 flex flex-col items-center relative">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm z-10 
+            <div key={i} className="relative flex min-w-0 flex-1 flex-col items-center">
+              <div
+                aria-current={step === i + 1 ? 'step' : undefined}
+                aria-label={`Passo ${i + 1}${step > i + 1 ? ', concluído' : step === i + 1 ? ', atual' : ''}`}
+                className={`z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold sm:h-8 sm:w-8 sm:text-sm
                 ${step > i + 1 ? 'bg-green-500 text-white' : step === i + 1 ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-400'}`}>
                 {step > i + 1 ? <Check size={16} /> : i + 1}
               </div>
               {i < totalSteps - 1 && (
-                <div className={`absolute top-4 left-1/2 w-full h-1 -translate-y-1/2 
+                <div className={`absolute left-1/2 top-3.5 h-1 w-full -translate-y-1/2 sm:top-4
                   ${step > i + 1 ? 'bg-green-500' : 'bg-slate-100'}`}></div>
               )}
             </div>
@@ -497,7 +578,7 @@ export default function NovaArea() {
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {formError.length > 0 && (
-          <div className="m-6 mb-0 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <div className="m-4 mb-0 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 sm:m-6 sm:mb-0">
             <p className="font-bold mb-2">Corrija esta etapa antes de continuar:</p>
             <ul className="list-disc pl-5 space-y-1">
               {formError.map(problema => <li key={problema}>{problema}</li>)}
@@ -505,14 +586,14 @@ export default function NovaArea() {
           </div>
         )}
         {avisosEtapaAtual.length > 0 && (
-          <div className="m-6 mb-0 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">
+          <div className="m-4 mb-0 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 sm:m-6 sm:mb-0" role="status">
             <p className="font-bold mb-2">Atenção: revise estes dados quando possível. Você pode continuar e salvar a área.</p>
             <ul className="list-disc pl-5 space-y-1">
               {avisosEtapaAtual.map((aviso) => <li key={aviso}>{aviso}</li>)}
             </ul>
           </div>
         )}
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Dados Gerais</h2>
@@ -522,54 +603,175 @@ export default function NovaArea() {
                   <input type="text" name="nome" value={formData.nome} onChange={handleChange} placeholder="Ex: Talhão 1 — Soja Safra Verão" className={inputClass} />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">Produtor Vinculado *</label>
-                  <select
-                    name="produtor_id"
-                    value={formData.produtor_id}
-                    onChange={handleChange}
-                    className={`${inputClass} bg-white`}
-                    required
-                  >
-                    <option value="">Selecione o produtor</option>
-                    {areaEmEdicao
-                      && !produtores.some((produtor) => produtor.id === areaEmEdicao.produtor_id) && (
-                        <option value={areaEmEdicao.produtor_id}>
-                          Produtor já vinculado ({areaEmEdicao.produtor_id})
-                        </option>
-                      )}
-                    {produtores.map((produtor) => (
-                      <option key={produtor.id} value={produtor.id}>
-                        {produtor.cpf
-                          ? `${produtor.nome} — CPF ${formatarCpf(produtor.cpf)}`
-                          : produtor.nome}
-                      </option>
-                    ))}
-                  </select>
+                  <label htmlFor="produtor-search" className="mb-1 block text-sm font-bold text-slate-700">Produtor vinculado *</label>
+                  <div ref={produtorSelectRef} className="relative">
+                    <div className="relative">
+                      <Search size={18} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        id="produtor-search"
+                        type="text"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={produtorSelectOpen}
+                        aria-controls="produtor-options"
+                        aria-activedescendant={
+                          produtorSelectOpen && produtoresFiltrados.length > 0
+                            ? `produtor-option-${produtoresFiltrados[produtorActiveIndex]?.id}`
+                            : undefined
+                        }
+                        aria-label="Pesquisar e selecionar produtor"
+                        autoComplete="off"
+                        value={produtorSelectOpen ? produtorSearch : produtorSelecionadoLabel}
+                        onFocus={() => {
+                          setProdutorSearch('');
+                          setProdutorActiveIndex(-1);
+                          setProdutorSelectOpen(true);
+                        }}
+                        onChange={(event) => {
+                          setProdutorSearch(event.currentTarget.value);
+                          setProdutorActiveIndex(-1);
+                          setProdutorSelectOpen(true);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            setProdutorSelectOpen(false);
+                            setProdutorSearch('');
+                          } else if (event.key === 'ArrowDown' && produtoresFiltrados.length > 0) {
+                            event.preventDefault();
+                            setProdutorActiveIndex((index) => index < 0
+                              ? 0
+                              : (index + 1) % produtoresFiltrados.length);
+                            setProdutorSelectOpen(true);
+                          } else if (event.key === 'ArrowUp' && produtoresFiltrados.length > 0) {
+                            event.preventDefault();
+                            setProdutorActiveIndex((index) => index < 0
+                              ? produtoresFiltrados.length - 1
+                              : (index - 1 + produtoresFiltrados.length) % produtoresFiltrados.length);
+                            setProdutorSelectOpen(true);
+                          } else if (event.key === 'Enter' && produtoresFiltrados.length > 0) {
+                            event.preventDefault();
+                            const produtor = produtoresFiltrados[
+                              produtorActiveIndex >= 0 ? produtorActiveIndex : 0
+                            ];
+                            setFormData((current) => ({
+                              ...current,
+                              produtor_id: produtor.id,
+                            }));
+                            setProdutorSelectOpen(false);
+                            setProdutorSearch('');
+                          }
+                        }}
+                        placeholder="Pesquisar por nome, CPF ou UID"
+                        className={`${inputClass} bg-white pl-10`}
+                      />
+                    </div>
+                    {produtorSelectOpen && (
+                      <div
+                        id="produtor-options"
+                        role="listbox"
+                        aria-label="Produtores encontrados"
+                        className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                      >
+                        {produtoresFiltrados.length > 0 ? produtoresFiltrados.map((produtor, index) => (
+                          <div
+                            key={produtor.id}
+                            id={`produtor-option-${produtor.id}`}
+                            role="option"
+                            tabIndex={-1}
+                            aria-selected={formData.produtor_id === produtor.id}
+                            onClick={() => {
+                              setFormData((current) => ({ ...current, produtor_id: produtor.id }));
+                              setProdutorSelectOpen(false);
+                              setProdutorSearch('');
+                            }}
+                            onMouseMove={() => setProdutorActiveIndex(index)}
+                            className={`cursor-pointer px-4 py-3 text-left text-sm text-slate-700 ${
+                              index === produtorActiveIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
+                            } ${formData.produtor_id === produtor.id ? 'font-semibold' : ''}`}
+                          >
+                            <span className="block">{produtor.cpf
+                              ? `${produtor.nome} — CPF ${formatarCpf(produtor.cpf)}`
+                              : produtor.nome}</span>
+                            {produtor.id === formData.produtor_id && (
+                              <span className="mt-0.5 block text-xs text-blue-700">Selecionado</span>
+                            )}
+                          </div>
+                        )) : (
+                          <p className="px-4 py-3 text-sm text-slate-500" role="status">
+                            {opcoesProdutores.length === 0
+                              ? 'Nenhum produtor disponível para selecionar.'
+                              : 'Nenhum produtor corresponde à pesquisa.'}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    {produtores.length > 0
-                      ? 'A lista contém produtores cadastrados no sistema.'
+                    {opcoesProdutores.length > 0
+                      ? 'Pesquise pelo nome, CPF ou UID e selecione um produtor da lista.'
                       : 'Nenhum produtor aparece na lista. Peça ao produtor para entrar novamente ou sincronize os perfis existentes pelo comando administrativo.'}
                   </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">Cultura</label>
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-1">
-                      <select value={culturaSugerida} onChange={(e) => aplicarCultura(e.target.value)} className={`${inputClass} bg-white`}>
-                        <option value="">Selecione para sugerir valores (opcional)</option>
-                        {SUGESTOES_CULTURA.map(c => (
-                          <option key={c.nome} value={c.nome}>{c.nome} — {c.prof_raiz_mm}mm de raiz</option>
-                        ))}
-                      </select>
-                      {culturaSugerida && (
-                        <p className="text-xs text-green-600 font-medium mt-1.5 flex items-center">
-                          <Sparkles size={12} className="mr-1" />
-                          Profundidade da raiz preenchida com {culturaSugerida}
-                        </p>
-                      )}
-                    </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="cultura" className="block text-sm font-bold text-slate-700 mb-1">Cultura *</label>
+                    <input
+                      id="cultura"
+                      type="text"
+                      name="cultura"
+                      value={formData.cultura}
+                      onChange={handleChange}
+                      maxLength={100}
+                      required
+                      placeholder="Ex.: milho, café, pastagem"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="prof_raiz_mm" className="block text-sm font-bold text-slate-700 mb-1">Profundidade radicular (mm) *</label>
+                    <input
+                      id="prof_raiz_mm"
+                      type="text"
+                      inputMode="decimal"
+                      name="prof_raiz_mm"
+                      value={formData.prof_raiz_mm}
+                      onChange={handleChange}
+                      onBlur={handleNumericBlur}
+                      required
+                      placeholder="Ex.: 400"
+                      className={inputClass}
+                    />
                   </div>
                 </div>
+                {recomendacoesCultura.length > 0 && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="flex items-center gap-2 text-sm font-bold text-emerald-900">
+                      <Sparkles size={16} />
+                      Culturas e profundidades mais usadas
+                    </p>
+                    <p className="mt-1 text-xs text-emerald-800">
+                      Recomendações baseadas nas áreas que você já cadastrou; clique para preencher.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {recomendacoesCultura.map((recomendacao) => (
+                        <button
+                          key={`${recomendacao.cultura}:${recomendacao.prof_raiz_mm}`}
+                          type="button"
+                          onClick={() => setFormData((current) => ({
+                            ...current,
+                            cultura: recomendacao.cultura,
+                            prof_raiz_mm: formatarNumeroLocalizado(String(recomendacao.prof_raiz_mm)),
+                          }))}
+                          className="rounded-lg border border-emerald-300 bg-white px-3 py-2 text-left text-sm text-emerald-950 transition-colors hover:bg-emerald-100"
+                        >
+                          <span className="font-semibold">{recomendacao.cultura}</span>
+                          <span> · {recomendacao.prof_raiz_mm} mm</span>
+                          <span className="ml-1 text-xs text-emerald-700">({recomendacao.quantidade} áreas)</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -604,7 +806,7 @@ export default function NovaArea() {
                   : 'Desenhar os limites da área é opcional. Clique no mapa para marcar os vértices ou avance sem desenhar; a posição exibida é apenas uma referência.'}
               </p>
 
-              <div className="h-[400px] w-full rounded-xl overflow-hidden border border-slate-300 relative z-0">
+              <div className="relative z-0 h-[min(400px,60vh)] w-full overflow-hidden rounded-xl border border-slate-300">
                 <MapContainer center={mapCenter} zoom={14} scrollWheelZoom={true} className="h-full w-full">
                   <HybridSatelliteTiles />
                   {localizacaoProdutor && (
@@ -621,27 +823,41 @@ export default function NovaArea() {
           {step === 3 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
               <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Tipo de Solo</h2>
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                <p className="font-bold">Use os valores do laudo físico-hídrico do solo.</p>
-                <p className="mt-1">Os coeficientes A e B precisam ser ajustados para a curva θ = A × ψ⁻ᴮ, com ψ em kPa e θ em cm³/cm³. O sistema não usa valores genéricos por textura.</p>
+              <div className="flex min-w-0 flex-col gap-4">
+                <SoilTextureTriangle selectedClass={formData.textura_referencia} />
+                <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
+                  <label htmlFor="referencia-solo" className="block text-sm font-bold text-slate-800">
+                    Referência textural do solo (opcional)
+                  </label>
+                  <select
+                    id="referencia-solo"
+                    value={formData.textura_referencia ?? ''}
+                    onChange={(event) => aplicarReferenciaSolo(event.currentTarget.value)}
+                    className={`${selectClass} mt-2`}
+                  >
+                    <option value="">Selecione a classe identificada no triângulo</option>
+                    {REFERENCIAS_TEXTURAIS.map(referencia => (
+                      <option key={referencia.id} value={referencia.id}>{referencia.nome}</option>
+                    ))}
+                  </select>
+                  <p className="mt-3 text-xs leading-5 text-slate-600">
+                    Use o triângulo como apoio visual e confirme a classe pela análise granulométrica. A planilha não informa valores de CC distintos por classe: ao selecionar uma, o campo CC recebe a média geral, 21% gravimétricos (faixa 18–26%), convertida para 0,252 cm³/cm³ (faixa 0,216–0,312) com Ds = 1,2 g/cm³. PMP médio: 9,5% (faixa 8–12%), apenas informativo. Os coeficientes A e B devem vir do laudo físico-hídrico.
+                  </p>
+                </div>
               </div>
               <h2 className="text-xl font-bold text-slate-800 border-b border-slate-100 pb-2">Parâmetros do Solo e Planta</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <FieldLabel label="Coeficiente A (a)" tooltip="Constante ajustada em laboratório para a curva θ = A × ψ⁻ᴮ, usando ψ em kPa. Não use um valor genérico por textura." />
+                  <FieldLabel label="Coeficiente A (a)" tooltip="Constante ajustada em laboratório para a curva θ = A × ψᴮ, com B negativo e ψ em kPa. Não use um valor genérico por textura." />
                   <input type="text" inputMode="decimal" name="coef_a" value={formData.coef_a} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Valor do laudo" className={inputClass} />
                 </div>
                 <div>
-                  <FieldLabel label="Coeficiente B (b)" tooltip="Expoente ajustado em laboratório para a curva de retenção. Deve usar a mesma unidade de pressão adotada no sistema: kPa." />
-                  <input type="text" inputMode="decimal" name="coef_b" value={formData.coef_b} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Valor do laudo" className={inputClass} />
+                  <FieldLabel label="Coeficiente B (b, negativo)" tooltip="Expoente negativo ajustado em laboratório para a curva θ = A × ψᴮ. Informe o valor negativo do laudo, usando ψ em kPa." />
+                  <input type="text" inputMode="decimal" name="coef_b" value={formData.coef_b} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: -0,1" className={inputClass} />
                 </div>
                 <div>
                   <FieldLabel label="Umidade Capac. Campo (θcc)" tooltip="Umidade volumétrica na capacidade de campo (cm³/cm³). Valores típicos: 0.10–0.50." />
                   <input type="text" inputMode="decimal" name="umidade_cc" value={formData.umidade_cc} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: 0,280" className={inputClass} />
-                </div>
-                <div>
-                  <FieldLabel label="Profundidade Raiz (Z) – mm" tooltip="Profundidade efetiva do sistema radicular da cultura, usada para calcular o volume de água disponível no solo e o tempo de irrigação." />
-                  <input type="text" inputMode="decimal" name="prof_raiz_mm" value={formData.prof_raiz_mm} onChange={handleChange} onBlur={handleNumericBlur} placeholder="Ex: 400 (soja)" className={inputClass} />
                 </div>
               </div>
             </div>
@@ -696,7 +912,7 @@ export default function NovaArea() {
 
           {step === 6 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-2">
                 <div className="flex items-center space-x-2">
                   <h2 className="text-xl font-bold text-slate-800">Tensiômetros</h2>
                   <Tooltip text="Cadastre a função e a faixa representativa de cada instrumento conforme o plano de monitoramento definido pelo agrônomo.">
@@ -792,7 +1008,7 @@ export default function NovaArea() {
                               <select
                                 value={t.tipo}
                                 onChange={(e) => handleUpdateTensiometro(setor.id, t.id, { tipo: e.target.value as 'decisao' | 'controle' })}
-                                className={`${inputClass} bg-white`}
+                                className={selectClass}
                               >
                                 <option value="decisao">Decisão</option>
                                 <option value="controle">Controle</option>
@@ -824,11 +1040,11 @@ export default function NovaArea() {
           )}
         </div>
 
-        <div className="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 p-4 sm:p-6">
           <button
             onClick={() => setStep(step - 1)}
             disabled={step === 1}
-            className="px-6 py-3 font-bold text-slate-600 disabled:opacity-0 hover:bg-slate-200 rounded-lg transition-colors"
+            className="rounded-lg px-4 py-3 font-bold text-slate-600 transition-colors hover:bg-slate-200 disabled:opacity-0 sm:px-6"
           >
             Voltar
           </button>
@@ -836,7 +1052,7 @@ export default function NovaArea() {
           {step < totalSteps ? (
             <button
               onClick={handleNextStep}
-              className="px-8 py-3 bg-blue-600 text-white font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+              className="rounded-lg bg-blue-600 px-5 py-3 font-bold text-white shadow-md transition-colors hover:bg-blue-700 sm:px-8"
             >
               Próximo Passo
             </button>
@@ -844,7 +1060,7 @@ export default function NovaArea() {
             <button
               onClick={handleFinish}
               disabled={saving}
-              className="px-8 py-3 bg-green-600 text-white font-bold rounded-lg shadow-md hover:bg-green-700 transition-colors flex items-center"
+              className="flex items-center rounded-lg bg-green-600 px-5 py-3 font-bold text-white shadow-md transition-colors hover:bg-green-700 sm:px-8"
             >
               <Check size={20} className="mr-2" />
               {saving ? 'Salvando...' : areaEmEdicao ? 'Salvar Alterações' : 'Finalizar Cadastro'}

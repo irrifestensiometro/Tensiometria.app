@@ -2,8 +2,14 @@ import { deleteDoc, doc, getDocs, collection, query, setDoc, where } from 'fireb
 import { db } from './firebase';
 import type { AreaDraft } from '../types';
 import { desserializarRascunhoArea, serializarRascunhoArea } from './areaDraftCodec';
+import { temDadosMinimosParaRascunho } from './areaDraftValidation';
 
 const localKey = (userId: string) => `irrIfes-area-drafts:${userId}`;
+const validarRascunhoSalvavel = (draft: AreaDraft) => {
+  if (!temDadosMinimosParaRascunho(draft.formData)) {
+    throw new Error('Preencha nome da área, produtor, cultura e profundidade radicular (50–2000 mm) antes de salvar o rascunho.');
+  }
+};
 
 export function listarRascunhosLocais(userId: string): AreaDraft[] {
   const rawDrafts = localStorage.getItem(localKey(userId));
@@ -17,6 +23,7 @@ export function listarRascunhosLocais(userId: string): AreaDraft[] {
 }
 
 export function salvarRascunhoLocal(rascunho: AreaDraft) {
+  validarRascunhoSalvavel(rascunho);
   const rascunhos = listarRascunhosLocais(rascunho.agronomo_id);
   const atualizados = [
     ...rascunhos.filter((item) => item.id !== rascunho.id),
@@ -31,6 +38,7 @@ export function removerRascunhoLocal(userId: string, draftId: string) {
 }
 
 export async function salvarRascunhoRemoto(rascunho: AreaDraft) {
+  validarRascunhoSalvavel(rascunho);
   await setDoc(doc(db, 'rascunhos_areas', rascunho.id), serializarRascunhoArea(rascunho));
 }
 

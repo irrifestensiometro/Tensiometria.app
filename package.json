@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/lib/irrigationMath.test.ts",
+    "test": "tsx --test src/lib/irrigationMath.test.ts src/lib/soilReferences.test.ts src/lib/cultureRecommendations.test.ts src/lib/areaDraftCodec.test.ts src/lib/areaDraftValidation.test.ts",
     "provision:admin": "tsx scripts/create-admin.ts",
     "provision:user": "tsx scripts/provision-user.ts",
     "delete:agronomist": "tsx scripts/delete-agronomist.ts"

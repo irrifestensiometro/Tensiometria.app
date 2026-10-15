@@ -8,7 +8,7 @@ import WorkspaceNavigation from '../components/WorkspaceNavigation';
 import WorkspaceFooter from '../components/WorkspaceFooter';
 
 export default function ProdutorLayout() {
-  const { userRole, currentUser, loading } = useAppContext();
+  const { userRole, currentUser, loading, leituraSyncError, refreshCurrentUser } = useAppContext();
 
   if (loading) {
     return <AILoadingState />;
@@ -35,6 +35,21 @@ export default function ProdutorLayout() {
           <ProfileMenu role="produtor" roleLabel="Produtor Rural" />
         </div>
       </header>
+
+      {leituraSyncError && (
+        <div role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6">
+          <div className="mx-auto flex max-w-7xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p>{leituraSyncError}</p>
+            <button
+              type="button"
+              onClick={() => void refreshCurrentUser()}
+              className="shrink-0 font-bold underline underline-offset-2"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        </div>
+      )}
       
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 pt-5 pb-24 sm:px-6 sm:pt-8 sm:pb-24 lg:px-8 lg:pb-10 flex flex-col">
         <Outlet />

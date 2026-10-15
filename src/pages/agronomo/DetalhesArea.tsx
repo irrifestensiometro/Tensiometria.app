@@ -106,7 +106,15 @@ export default function DetalhesAreaAgronomo() {
             </p>
           </div>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/agronomo/leituras/nova', { state: { areaId: area.id } })}
+            className="flex items-center space-x-2 rounded-xl bg-[#356b46] px-3 py-2.5 font-bold text-white shadow-sm transition-colors hover:bg-[#2a5538] sm:px-5"
+          >
+            <Activity size={16} />
+            <span>Registrar leitura</span>
+          </button>
           <button
             onClick={handleEdit}
             className="flex items-center space-x-2 bg-white hover:bg-slate-50 text-slate-700 px-5 py-2.5 rounded-xl font-bold transition-colors border border-slate-200 shadow-sm"
@@ -130,7 +138,7 @@ export default function DetalhesAreaAgronomo() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-in zoom-in-95 duration-200">
             <h2 className="text-xl font-bold text-slate-800 mb-2">Excluir Área</h2>
             <p className="text-slate-500 mb-6">
-              Tem certeza que deseja excluir <strong>{area.nome}</strong>? Esta ação não pode ser desfeita e todas as leituras associadas serão perdidas.
+              Tem certeza que deseja excluir <strong>{area.nome}</strong>? Esta ação não pode ser desfeita e excluirá também todas as leituras associadas.
             </p>
             <div className="flex items-center justify-end space-x-3">
               <button
@@ -179,6 +187,12 @@ export default function DetalhesAreaAgronomo() {
               Parâmetros Técnicos
             </h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {area.cultura && (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">Cultura</p>
+                  <p className="font-bold text-slate-800 text-lg">{area.cultura}</p>
+                </div>
+              )}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">Coef. A (a)</p>
                 <p className="font-bold text-slate-800 text-lg">{area.solo.coef_a.toFixed(3)}</p>

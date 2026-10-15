@@ -134,6 +134,12 @@ export default function DetalhesArea() {
             </h3>
             
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {area.cultura && (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">Cultura</p>
+                  <p className="font-bold text-slate-800 text-lg">{area.cultura}</p>
+                </div>
+              )}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
                 <p className="text-[10px] uppercase font-bold text-slate-400 mb-1">Vazão do Sistema (Ip)</p>
                 <p className="font-bold text-slate-800 text-lg">{area.irrigacao.vazao_ip} <span className="text-sm font-medium text-slate-500">mm/h</span></p>
